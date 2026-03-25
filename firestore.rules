@@ -118,11 +118,14 @@ service cloud.firestore {
     // Orders Collection
     match /orders/{orderId} {
       // Anyone can create an order (since customers are not authenticated)
-      allow create: if isValidOrder(request.resource.data);
+      // Enforce server timestamp to prevent manipulation
+      allow create: if isValidOrder(request.resource.data)
+                    && request.resource.data.createdAt == request.time;
       
-      // Anyone can read an order (to track it)
-      // Staff and admins can read and update orders
-      allow read: if true;
+      // Anyone can GET a single order by ID (for tracking via URL)
+      // Only staff/admin can LIST (query) all orders
+      allow get: if true;
+      allow list: if isStaff();
       allow update: if isStaff() && isValidOrder(request.resource.data);
       allow delete: if isAdmin();
     }
