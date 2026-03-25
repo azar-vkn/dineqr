@@ -1,16 +1,34 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { Printer, Download, Link2 } from "lucide-react";
+import { Printer, Link2 } from "lucide-react";
+import { cn } from "../lib/utils";
 
 export default function AdminQR() {
   const [tableCount, setTableCount] = useState(10);
+  const [printTarget, setPrintTarget] = useState<number | null>(null);
   
   // Dynamically use the current domain so QR codes work on any deployment
   const appUrl = window.location.origin;
   const baseUrl = `${appUrl}/table/`;
 
-  const handlePrint = () => {
-    window.print();
+  useEffect(() => {
+    const handleAfterPrint = () => setPrintTarget(null);
+    window.addEventListener("afterprint", handleAfterPrint);
+    return () => window.removeEventListener("afterprint", handleAfterPrint);
+  }, []);
+
+  const handlePrintAll = () => {
+    setPrintTarget(null);
+    setTimeout(() => {
+      window.print();
+    }, 100);
+  };
+
+  const handlePrintSingle = (tableNumber: number) => {
+    setPrintTarget(tableNumber);
+    setTimeout(() => {
+      window.print();
+    }, 100);
   };
 
   return (
@@ -43,8 +61,8 @@ export default function AdminQR() {
             </div>
             
             <button 
-              onClick={handlePrint}
-              className="flex items-center gap-2 bg-emerald-800 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-emerald-900 transition-colors shadow-sm"
+              onClick={handlePrintAll}
+              className="flex items-center gap-2 bg-emerald-800 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-emerald-900 transition-colors shadow-sm whitespace-nowrap"
             >
               <Printer className="w-4 h-4" />
               Print All
@@ -52,7 +70,7 @@ export default function AdminQR() {
           </div>
         </header>
 
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 print:grid-cols-3 print:gap-8">
+        <div className={cn("grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6", printTarget === null ? "print:grid-cols-3 print:gap-8" : "print:hidden")}>
           {Array.from({ length: tableCount }).map((_, i) => {
             const tableNumber = i + 1;
             const url = `${baseUrl}${tableNumber}`;
@@ -79,26 +97,64 @@ export default function AdminQR() {
                   <p className="text-xs text-stone-500 max-w-[140px] mx-auto">Point your phone camera here to view the menu</p>
                 </div>
                 
-                <div className="pt-4 w-full border-t border-stone-100 flex justify-center print:hidden">
+                <div className="pt-4 w-full border-t border-stone-100 flex gap-2 justify-center print:hidden">
                   <a 
                     href={url} 
                     target="_blank" 
                     rel="noreferrer"
-                    className="flex items-center justify-center gap-2 w-full py-2.5 bg-emerald-800 text-white font-medium rounded-xl hover:bg-emerald-900 transition-colors text-sm shadow-sm"
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-emerald-50 text-emerald-800 font-medium rounded-xl hover:bg-emerald-100 transition-colors text-sm shadow-sm"
                   >
                     <Link2 className="w-4 h-4" />
-                    Order
+                    Visit
                   </a>
+                  <button 
+                    onClick={() => handlePrintSingle(tableNumber)}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-emerald-800 text-white font-medium rounded-xl hover:bg-emerald-900 transition-colors text-sm shadow-sm"
+                  >
+                    <Printer className="w-4 h-4" />
+                    Print
+                  </button>
                 </div>
               </div>
             );
           })}
         </div>
+        
+        {/* Full Page Print View for Single QR Code */}
+        {printTarget !== null && (
+          <div className="hidden print:flex fixed inset-0 bg-white flex-col items-center justify-center p-12 z-50">
+            <div className="flex flex-col items-center text-center space-y-12 max-w-lg w-full mx-auto">
+              <div className="w-full flex justify-between items-center mb-4">
+                <span className="text-3xl font-bold text-stone-400 uppercase tracking-widest">DineQR</span>
+                <span className="text-3xl font-bold border-4 border-stone-900 text-stone-900 px-6 py-3 rounded-2xl uppercase tracking-wider">
+                  Table {printTarget}
+                </span>
+              </div>
+              
+              <div className="bg-white p-8 rounded-[3rem] border-8 border-stone-900 shadow-xl inline-block">
+                <QRCodeSVG 
+                  value={`${baseUrl}${printTarget}`} 
+                  size={400}
+                  level="H"
+                  includeMargin={false}
+                  fgColor="#1c1917" // stone-900
+                />
+              </div>
+              
+              <div className="space-y-6 pt-8">
+                <h3 className="font-extrabold text-stone-900 text-6xl uppercase tracking-wider">Scan to Order</h3>
+                <p className="text-2xl text-stone-600 font-medium">Point your phone camera here to view our menu</p>
+              </div>
+            </div>
+          </div>
+        )}
+
       {/* Print Styles */}
       <style>{`
         @media print {
           body { background: white; }
           .print\\:hidden { display: none !important; }
+          .print\\:flex { display: flex !important; }
           .print\\:shadow-none { box-shadow: none !important; }
           .print\\:border-stone-300 { border-color: #d6d3d1 !important; }
           .print\\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
