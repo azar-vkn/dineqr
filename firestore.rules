@@ -117,10 +117,9 @@ service cloud.firestore {
 
     // Orders Collection
     match /orders/{orderId} {
-      // Anyone can create an order (since customers are not authenticated)
-      // Enforce server timestamp to prevent manipulation
-      allow create: if isValidOrder(request.resource.data)
-                    && request.resource.data.createdAt == request.time;
+      // Orders MUST be created securely via the backend Cloud Function 
+      // preventing malicious users from spoofing prices or payment status.
+      allow create: if false;
       
       // Anyone can GET a single order by ID (for tracking via URL)
       // Only staff/admin can LIST (query) all orders

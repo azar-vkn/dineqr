@@ -1,12 +1,11 @@
 import { useState, useEffect } from "react";
 import { useCartStore } from "../store";
 import { useNavigate } from "react-router-dom";
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import { db } from "../firebase";
+import { httpsCallable } from "firebase/functions";
+import { functions } from "../firebase";
 import { toast } from "sonner";
-import { Loader2, CreditCard, CheckCircle2, QrCode, Smartphone } from "lucide-react";
+import { Loader2, CreditCard, CheckCircle2, QrCode, Smartphone, ShieldCheck } from "lucide-react";
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
-import { QRCodeSVG } from "qrcode.react";
 
 export default function CheckoutPage() {
   const { items, getTotal, tableNumber, clearCart } = useCartStore();
@@ -15,17 +14,11 @@ export default function CheckoutPage() {
   const [loading, setLoading] = useState(true);
   const [paymentMethod, setPaymentMethod] = useState<"upi" | "cash">("upi");
   const [isProcessingCash, setIsProcessingCash] = useState(false);
-  const [showUpiModal, setShowUpiModal] = useState(false);
-  const [isVerifying, setIsVerifying] = useState(false);
-
-  // Replace this with your actual merchant UPI ID
-  const MERCHANT_UPI_ID = "asirselvin446@oksbi";
-  const MERCHANT_NAME = "ABA Agents";
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [orderId, setOrderId] = useState<string | null>(null);
 
   const total = getTotal();
   const finalAmount = Math.round(total * 1.05); // Including 5% tax
-
-  const upiLink = `upi://pay?pa=${MERCHANT_UPI_ID}&pn=${encodeURIComponent(MERCHANT_NAME)}&am=${finalAmount}&cu=INR&tn=Order%20Table%20${tableNumber}`;
 
   useEffect(() => {
     if (items.length === 0 && !orderPlaced) {
@@ -35,55 +28,82 @@ export default function CheckoutPage() {
     setLoading(false);
   }, [items, navigate, orderPlaced]);
 
-  const handlePaymentSuccess = async (method: "paid" | "pending_collection" = "paid") => {
-    try {
-      // Create order in Firestore
-      const docRef = await addDoc(collection(db, "orders"), {
-        tableNumber: tableNumber || "Unknown",
-        items: items.map(item => ({
-          id: item.id,
-          name: item.name,
-          price: item.price,
-          quantity: item.quantity
-        })),
-        total: finalAmount,
-        status: "pending",
-        paymentStatus: method,
-        paymentMethod: method === "pending_collection" ? "cash" : "upi",
-        createdAt: serverTimestamp()
-      });
-
-      setOrderPlaced(true);
-      clearCart();
-      toast.success("Order placed successfully!");
-      navigate(`/order/${docRef.id}`);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, "orders");
-    }
-  };
-
   const handleCashOrder = async () => {
     setIsProcessingCash(true);
     try {
-      await handlePaymentSuccess("pending_collection");
+      const createCashOrder = httpsCallable(functions, "createCashOrder");
+      const result = await createCashOrder({ items, tableNumber });
+      const data = result.data as any;
+
+      setOrderId(data.orderId);
+      setOrderPlaced(true);
+      clearCart();
+      toast.success("Order placed! Please pay at the counter.");
+      navigate(`/order/${data.orderId}`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, "orders");
     } finally {
       setIsProcessingCash(false);
     }
   };
 
-  const handleUpiPayment = async () => {
-    setShowUpiModal(true);
-  };
-
-  const confirmUpiPayment = async () => {
-    setIsVerifying(true);
+  const initRazorpayPayment = async () => {
+    setIsProcessingPayment(true);
     try {
-      // Simulate a brief verification delay
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      await handlePaymentSuccess("paid");
+      const createOrder = httpsCallable(functions, "createOrder");
+      const { data } = await createOrder({ items, tableNumber });
+      const orderData = data as any;
+
+      const options = {
+        key: orderData.keyId,
+        amount: orderData.amount,
+        currency: orderData.currency,
+        name: "DineQR",
+        description: `Order for Table ${tableNumber}`,
+        order_id: orderData.razorpayOrderId,
+        handler: async function (response: any) {
+          try {
+            toast.loading("Verifying payment...");
+            const verifyPayment = httpsCallable(functions, "verifyPayment");
+            
+            await verifyPayment({
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+              firestore_order_id: orderData.orderId,
+            });
+
+            toast.dismiss();
+            toast.success("Payment successful!");
+            setOrderId(orderData.orderId);
+            setOrderPlaced(true);
+            clearCart();
+            navigate(`/order/${orderData.orderId}`);
+          } catch (e) {
+            toast.dismiss();
+            toast.error("Payment verification failed. Please contact staff.");
+          }
+        },
+        prefill: {
+          name: "Guest",
+          email: "guest@example.com",
+          contact: "9999999999",
+        },
+        theme: {
+          color: "#059669",
+        },
+      };
+
+      const razorpayInstance = new (window as any).Razorpay(options);
+      razorpayInstance.on('payment.failed', function (response: any){
+        toast.error(`Payment failed: ${response.error.description}`);
+      });
+      razorpayInstance.open();
+
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, "orders");
     } finally {
-      setIsVerifying(false);
-      setShowUpiModal(false);
+      setIsProcessingPayment(false);
     }
   };
 
@@ -113,7 +133,7 @@ export default function CheckoutPage() {
           onClick={() => setPaymentMethod("upi")}
           className={`flex-1 py-3 rounded-lg font-medium transition-all ${paymentMethod === "upi" ? "bg-white shadow-sm text-emerald-800" : "text-stone-500 hover:text-stone-700"}`}
         >
-          Pay with UPI
+          Pay Securely (Online)
         </button>
         <button 
           onClick={() => setPaymentMethod("cash")}
@@ -160,78 +180,25 @@ export default function CheckoutPage() {
             <div className="space-y-6">
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 text-center space-y-4">
                 <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
-                  <Smartphone className="w-8 h-8" />
+                  <ShieldCheck className="w-8 h-8" />
                 </div>
-                <h3 className="font-bold text-lg">UPI Payment</h3>
-                <p className="text-sm text-stone-500">Pay securely using Google Pay, PhonePe, Paytm, or any UPI app.</p>
+                <h3 className="font-bold text-lg">Secure Online Payment</h3>
+                <p className="text-sm text-stone-500">Pay securely using UPI, Credit/Debit card, Netbanking, or Wallets powered by Razorpay.</p>
               </div>
 
               <button
-                onClick={handleUpiPayment}
-                className="w-full py-4 bg-emerald-800 text-white font-bold rounded-2xl hover:bg-emerald-900 transition-colors flex items-center justify-center gap-2"
+                onClick={initRazorpayPayment}
+                disabled={isProcessingPayment}
+                className="w-full py-4 bg-emerald-800 text-white font-bold rounded-2xl hover:bg-emerald-900 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                <QrCode className="w-5 h-5" /> Pay ₹{finalAmount} via UPI
+                {isProcessingPayment ? (
+                  <><Loader2 className="w-5 h-5 animate-spin" /> Initializing...</>
+                ) : (
+                  <><CreditCard className="w-5 h-5" /> Pay ₹{finalAmount} Securely</>
+                )}
               </button>
             </div>
           )}
-        </div>
-      )}
-
-      {/* UPI QR Modal */}
-      {showUpiModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-sm rounded-3xl p-8 space-y-6 relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-2 bg-emerald-600"></div>
-            
-            <div className="text-center space-y-2">
-              <h3 className="text-xl font-bold text-stone-800">Scan to Pay</h3>
-              <p className="text-sm text-stone-500">Table {tableNumber} • ₹{finalAmount}</p>
-            </div>
-
-            <div className="bg-stone-50 p-6 rounded-2xl border border-stone-100 flex flex-col items-center justify-center space-y-4">
-              <div className="bg-white p-4 rounded-xl shadow-sm">
-                <QRCodeSVG value={upiLink} size={200} level="H" />
-              </div>
-              <div className="text-center">
-                <p className="text-xs font-mono text-stone-400 uppercase tracking-widest mb-1">UPI ID</p>
-                <p className="text-sm font-bold text-stone-700">{MERCHANT_UPI_ID}</p>
-              </div>
-              
-              {/* Deep link button for mobile users */}
-              <a 
-                href={upiLink}
-                className="w-full py-4 bg-emerald-50 border-2 border-emerald-600 text-emerald-700 font-bold rounded-2xl flex items-center justify-center gap-2 hover:bg-emerald-100 transition-colors"
-              >
-                <Smartphone className="w-5 h-5" />
-                Open Payment App
-              </a>
-            </div>
-
-            <div className="space-y-3">
-              <button
-                onClick={confirmUpiPayment}
-                disabled={isVerifying}
-                className="w-full py-4 bg-emerald-800 text-white font-bold rounded-2xl hover:bg-emerald-900 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {isVerifying ? (
-                  <><Loader2 className="w-5 h-5 animate-spin" /> Verifying Payment...</>
-                ) : (
-                  "I have paid"
-                )}
-              </button>
-              <button
-                onClick={() => setShowUpiModal(false)}
-                disabled={isVerifying}
-                className="w-full py-3 text-stone-500 font-medium hover:text-stone-800 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-
-            <p className="text-[10px] text-center text-stone-400">
-              By clicking "I have paid", you confirm that you have completed the transaction in your UPI app.
-            </p>
-          </div>
         </div>
       )}
     </div>
