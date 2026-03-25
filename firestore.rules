@@ -145,5 +145,11 @@ service cloud.firestore {
       allow get: if true;
       allow list: if isStaff();
     }
+
+    // Reports Collection
+    // Tracks daily email reports sent
+    match /reports/{reportId} {
+      allow read, write: if isStaff();
+    }
   }
 }

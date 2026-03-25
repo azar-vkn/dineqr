@@ -6,6 +6,7 @@ import { auth, db } from "../firebase";
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from "firebase/auth";
 import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { toast } from "sonner";
+import { useDailyReport } from "../hooks/useDailyReport";
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
@@ -60,6 +61,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     });
     return () => unsubscribe();
   }, []);
+
+  // Initialize the background checker for daily reports (only runs if role === "admin")
+  useDailyReport(role);
 
   const handleLogin = async () => {
     const provider = new GoogleAuthProvider();
