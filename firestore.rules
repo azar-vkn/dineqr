@@ -129,5 +129,20 @@ service cloud.firestore {
       allow update: if isStaff() && isValidOrder(request.resource.data);
       allow delete: if isAdmin();
     }
+
+    // Feedback Collection
+    // Document ID matches the Order ID
+    match /feedback/{orderId} {
+      // Anyone can create feedback for an existing order
+      allow create: if exists(/databases/$(database)/documents/orders/$(orderId))
+                    && request.resource.data.keys().hasAll(['rating', 'createdAt'])
+                    && request.resource.data.rating is number
+                    && request.resource.data.rating >= 1 && request.resource.data.rating <= 5
+                    && request.resource.data.createdAt == request.time;
+      
+      // Anyone can read a single feedback doc if they have the ID, only staff can list
+      allow get: if true;
+      allow list: if isStaff();
+    }
   }
 }

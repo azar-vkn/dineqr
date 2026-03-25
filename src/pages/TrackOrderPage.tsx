@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
-import { Loader2, CheckCircle2, Clock, ChefHat, Utensils, ArrowLeft } from "lucide-react";
+import { Loader2, CheckCircle2, Clock, ChefHat, Utensils, ArrowLeft, Star } from "lucide-react";
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
 
 interface OrderItem {
@@ -35,10 +35,17 @@ export default function TrackOrderPage() {
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Feedback state
+  const [feedback, setFeedback] = useState<{ rating: number, comment?: string } | null>(null);
+  const [rating, setRating] = useState(0);
+  const [hoverRating, setHoverRating] = useState(0);
+  const [comment, setComment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
   useEffect(() => {
     if (!orderId) return;
 
-    const unsubscribe = onSnapshot(
+    const unsubscribeOrder = onSnapshot(
       doc(db, "orders", orderId),
       (docSnap) => {
         if (docSnap.exists()) {
@@ -54,8 +61,42 @@ export default function TrackOrderPage() {
       }
     );
 
-    return () => unsubscribe();
+    const unsubscribeFeedback = onSnapshot(
+      doc(db, "feedback", orderId),
+      (docSnap) => {
+        if (docSnap.exists()) {
+          setFeedback(docSnap.data() as { rating: number, comment?: string });
+        }
+      },
+      (error) => {
+        console.error("Error fetching feedback:", error);
+      }
+    );
+
+    return () => {
+      unsubscribeOrder();
+      unsubscribeFeedback();
+    };
   }, [orderId]);
+
+  const handleSubmitFeedback = async () => {
+    if (rating === 0) return;
+    setSubmitting(true);
+    try {
+      if (!orderId) return;
+      await setDoc(doc(db, "feedback", orderId), {
+        rating,
+        comment: comment.trim(),
+        createdAt: serverTimestamp()
+      });
+      // The onSnapshot listener will automatically update the UI
+    } catch (error) {
+      console.error("Error submitting feedback:", error);
+      alert("Failed to submit feedback. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -203,6 +244,78 @@ export default function TrackOrderPage() {
           <span className="text-emerald-700">₹{order.total}</span>
         </div>
       </div>
+
+      {/* Feedback Section */}
+      {order.status === "served" && (
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 space-y-4 text-center mt-6">
+          {feedback ? (
+            <div className="py-4 space-y-3">
+              <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-2">
+                <CheckCircle2 className="w-8 h-8" />
+              </div>
+              <h3 className="font-bold text-stone-800 text-xl">Thank you for your feedback!</h3>
+              <div className="flex justify-center gap-1">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <Star 
+                    key={star} 
+                    className={`w-6 h-6 ${star <= feedback.rating ? "fill-amber-400 text-amber-400" : "text-stone-200"}`} 
+                  />
+                ))}
+              </div>
+              {feedback.comment && (
+                <p className="text-stone-600 italic bg-stone-50 p-3 rounded-xl inline-block mt-2">"{feedback.comment}"</p>
+              )}
+            </div>
+          ) : (
+            <div className="py-2 space-y-5">
+              <h3 className="font-bold text-stone-800 text-xl">How was your meal?</h3>
+              <p className="text-sm text-stone-500 max-w-sm mx-auto">We'd love to hear about your experience. Your feedback helps us improve.</p>
+              
+              <div className="flex justify-center gap-2" onMouseLeave={() => setHoverRating(0)}>
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button
+                    key={star}
+                    type="button"
+                    onClick={() => setRating(star)}
+                    onMouseEnter={() => setHoverRating(star)}
+                    className="p-1 transition-transform hover:scale-110 focus:outline-none"
+                  >
+                    <Star 
+                      className={`w-10 h-10 transition-colors ${
+                        star <= (hoverRating || rating) 
+                          ? "fill-amber-400 text-amber-400" 
+                          : "text-stone-200"
+                      }`} 
+                    />
+                  </button>
+                ))}
+              </div>
+              
+              {rating > 0 && (
+                <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <textarea
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                    placeholder="Tell us what you liked or what we can do better (optional)"
+                    className="w-full max-w-md mx-auto p-3 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-sm resize-none h-24 block"
+                  />
+                  <button
+                    onClick={handleSubmitFeedback}
+                    disabled={submitting}
+                    className="px-8 py-3 bg-emerald-800 text-white font-medium rounded-xl hover:bg-emerald-900 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 mx-auto"
+                  >
+                    {submitting ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      "Submit Feedback"
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
