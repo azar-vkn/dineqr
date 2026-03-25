@@ -17,13 +17,6 @@ export default function AdminQR() {
     return () => window.removeEventListener("afterprint", handleAfterPrint);
   }, []);
 
-  const handlePrintAll = () => {
-    setPrintTarget(null);
-    setTimeout(() => {
-      window.print();
-    }, 100);
-  };
-
   const handlePrintSingle = (tableNumber: number) => {
     setPrintTarget(tableNumber);
     setTimeout(() => {
@@ -59,14 +52,6 @@ export default function AdminQR() {
                 className="w-20 px-3 py-2 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
-            
-            <button 
-              onClick={handlePrintAll}
-              className="flex items-center gap-2 bg-emerald-800 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-emerald-900 transition-colors shadow-sm whitespace-nowrap"
-            >
-              <Printer className="w-4 h-4" />
-              Print All
-            </button>
           </div>
         </header>
 
