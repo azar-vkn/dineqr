@@ -1,6 +1,5 @@
-# DineQR - GitHub Auto Sync (Continuous)
-# Syncs every 10 seconds. Only commits/pushes when there are actual changes.
-# Uses rebase to avoid merge commits and stash to prevent conflicts.
+# DineQR - GitHub Auto Sync (Smart Continuous)
+# Detects latest changes from both GitHub and local, syncs intelligently.
 # Press Ctrl+C to stop.
 
 Set-Location $PSScriptRoot
@@ -9,7 +8,7 @@ $syncInterval = 10  # seconds
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "   DineQR - GitHub Auto Sync" -ForegroundColor Cyan
+Write-Host "   DineQR - Smart GitHub Auto Sync" -ForegroundColor Cyan
 Write-Host "   Syncing every ${syncInterval}s | Ctrl+C to stop" -ForegroundColor DarkCyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
@@ -20,55 +19,109 @@ while ($true) {
     $cycle++
     $now = Get-Date -Format "HH:mm:ss"
 
-    # Check if there are local changes
-    $changes = git status --porcelain 2>$null
-    $hasChanges = [bool]$changes
+    # --- Detect local changes ---
+    $localChanges = git status --porcelain 2>$null
+    $hasLocalChanges = [bool]$localChanges
 
-    if (-not $hasChanges) {
-        # No local changes — do a quiet pull only
-        $pullOutput = git pull origin main --rebase --quiet 2>&1
+    # --- Detect remote changes (fetch without merging) ---
+    git fetch origin main --quiet 2>$null
+
+    $localHead = git rev-parse HEAD 2>$null
+    $remoteHead = git rev-parse origin/main 2>$null
+    $mergeBase = git merge-base HEAD origin/main 2>$null
+
+    $remoteAhead = ($localHead -ne $remoteHead) -and ($mergeBase -eq $localHead)
+    $localAhead = ($localHead -ne $remoteHead) -and ($mergeBase -eq $remoteHead)
+    $diverged = ($localHead -ne $remoteHead) -and ($mergeBase -ne $localHead) -and ($mergeBase -ne $remoteHead)
+    $inSync = ($localHead -eq $remoteHead)
+
+    # --- CASE 1: No changes anywhere ---
+    if ($inSync -and -not $hasLocalChanges) {
+        Write-Host "[$now] #$cycle - Everything in sync" -ForegroundColor DarkGray
+    }
+
+    # --- CASE 2: Only remote has new changes (pull first) ---
+    elseif (($remoteAhead -or $diverged) -and -not $hasLocalChanges) {
+        Write-Host "[$now] #$cycle - Remote has updates, pulling..." -ForegroundColor Magenta
+        git pull origin main --rebase --quiet 2>&1
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "[$now] #$cycle - In sync (no local changes)" -ForegroundColor DarkGray
+            Write-Host "[$now]   Pulled latest from GitHub." -ForegroundColor Green
         } else {
-            Write-Host "[$now] #$cycle - Pull issue: $pullOutput" -ForegroundColor Red
+            Write-Host "[$now]   Pull failed! Check manually." -ForegroundColor Red
         }
-    } else {
-        Write-Host "[$now] #$cycle - Changes detected, syncing..." -ForegroundColor Yellow
+    }
 
-        # Stash local changes to safely pull
+    # --- CASE 3: Only local has new changes (commit & push) ---
+    elseif (($inSync -or $localAhead) -and $hasLocalChanges) {
+        Write-Host "[$now] #$cycle - Local changes detected, pushing..." -ForegroundColor Yellow
+        git add -A
+        $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        git commit -m "Auto sync: $timestamp" --quiet 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            git push origin main --quiet 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "[$now]   Pushed to GitHub." -ForegroundColor Green
+            } else {
+                Write-Host "[$now]   Push failed! Will retry." -ForegroundColor Red
+            }
+        } else {
+            Write-Host "[$now]   Nothing new to commit." -ForegroundColor DarkGray
+        }
+    }
+
+    # --- CASE 4: Both local AND remote have changes (pull remote first, then push local) ---
+    elseif (($remoteAhead -or $diverged) -and $hasLocalChanges) {
+        Write-Host "[$now] #$cycle - Both sides changed! Syncing smart..." -ForegroundColor Cyan
+
+        # Stash local changes
         git stash push -m "auto-sync-stash" --quiet 2>$null
         $stashed = $LASTEXITCODE -eq 0
 
-        # Pull latest with rebase (avoids messy merge commits)
+        # Pull remote changes first
+        Write-Host "[$now]   Pulling remote first..." -ForegroundColor Magenta
         git pull origin main --rebase --quiet 2>&1
         $pullOk = $LASTEXITCODE -eq 0
 
-        # Restore stashed changes
+        if (-not $pullOk) {
+            Write-Host "[$now]   Pull failed during merge. Resolve manually." -ForegroundColor Red
+            if ($stashed) { git stash pop --quiet 2>$null }
+            Start-Sleep -Seconds $syncInterval
+            continue
+        }
+
+        # Restore local changes on top
         if ($stashed) {
-            $popOutput = git stash pop --quiet 2>&1
+            git stash pop --quiet 2>&1
             if ($LASTEXITCODE -ne 0) {
-                Write-Host "[$now]   CONFLICT detected! Aborting this cycle." -ForegroundColor Red
+                Write-Host "[$now]   CONFLICT! Your changes clash with remote." -ForegroundColor Red
                 Write-Host "[$now]   Run 'git stash pop' and resolve manually." -ForegroundColor Red
-                git stash drop --quiet 2>$null
                 Start-Sleep -Seconds $syncInterval
                 continue
             }
         }
 
-        # Stage, commit, and push
+        # Commit and push local changes
         git add -A
         $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
         git commit -m "Auto sync: $timestamp" --quiet 2>$null
-
         if ($LASTEXITCODE -eq 0) {
             git push origin main --quiet 2>&1
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "[$now]   Pushed successfully." -ForegroundColor Green
+                Write-Host "[$now]   Synced both directions!" -ForegroundColor Green
             } else {
-                Write-Host "[$now]   Push failed. Will retry next cycle." -ForegroundColor Red
+                Write-Host "[$now]   Push failed after pull. Will retry." -ForegroundColor Red
             }
+        }
+    }
+
+    # --- CASE 5: Local is ahead (committed but not pushed) ---
+    elseif ($localAhead -and -not $hasLocalChanges) {
+        Write-Host "[$now] #$cycle - Unpushed commits, pushing..." -ForegroundColor Yellow
+        git push origin main --quiet 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[$now]   Pushed to GitHub." -ForegroundColor Green
         } else {
-            Write-Host "[$now]   Nothing new to commit." -ForegroundColor DarkGray
+            Write-Host "[$now]   Push failed! Will retry." -ForegroundColor Red
         }
     }
 
