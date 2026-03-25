@@ -20,6 +20,7 @@ interface Order {
   status: "pending" | "preparing" | "ready" | "served" | "cancelled";
   paymentStatus: string;
   paymentMethod?: string;
+  customerName?: string;
   createdAt: any;
 }
 
@@ -341,7 +342,12 @@ export default function AdminHistory() {
                       </div>
                     </td>
                     <td className="p-4">
-                      <span className="font-black text-emerald-900 text-lg">{order.tableNumber}</span>
+                      <div className="flex flex-col">
+                        <span className="font-black text-emerald-900 text-lg">{order.tableNumber}</span>
+                        {order.customerName && order.customerName !== "Guest" && (
+                          <span className="text-[10px] text-stone-500 font-bold uppercase tracking-wider">{order.customerName}</span>
+                        )}
+                      </div>
                     </td>
                     <td className="p-4">
                       {expandedOrder === order.id ? (

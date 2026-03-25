@@ -9,7 +9,7 @@ import { handleFirestoreError, OperationType } from "../lib/firestore-error";
 import { QRCodeSVG } from "qrcode.react";
 
 export default function CheckoutPage() {
-  const { items, getTotal, tableNumber, clearCart } = useCartStore();
+  const { items, getTotal, tableNumber, customerName, clearCart } = useCartStore();
   const navigate = useNavigate();
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -40,6 +40,7 @@ export default function CheckoutPage() {
       // Create order in Firestore
       const docRef = await addDoc(collection(db, "orders"), {
         tableNumber: tableNumber || "Unknown",
+        customerName: customerName || "Guest",
         items: items.map(item => ({
           id: item.id,
           name: item.name,

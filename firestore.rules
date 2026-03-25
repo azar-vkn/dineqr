@@ -81,6 +81,7 @@ service cloud.firestore {
     function isValidOrder(data) {
       return data.keys().hasAll(['tableNumber', 'items', 'total', 'status', 'paymentStatus', 'createdAt']) &&
              data.tableNumber is string && data.tableNumber.size() > 0 && data.tableNumber.size() < 20 &&
+             (!('customerName' in data) || (data.customerName is string && data.customerName.size() <= 100)) &&
              data.items is list && data.items.size() > 0 && data.items.size() <= 50 &&
              data.total is number && data.total >= 0 &&
              data.status in ['pending', 'preparing', 'ready', 'served', 'cancelled'] &&

@@ -15,6 +15,7 @@ interface OrderItem {
 interface Order {
   id: string;
   tableNumber: string;
+  customerName?: string;
   items: OrderItem[];
   total: number;
   status: "pending" | "preparing" | "ready" | "served" | "cancelled";
@@ -254,6 +255,7 @@ export default function TrackOrderPage() {
                 <CheckCircle2 className="w-8 h-8" />
               </div>
               <h3 className="font-bold text-stone-800 text-xl">Thank you for your feedback!</h3>
+              <p className="text-emerald-700 font-medium mb-2">Please visit us again{order.customerName && order.customerName !== "Guest" ? `, ${order.customerName}` : ""}!</p>
               <div className="flex justify-center gap-1">
                 {[1, 2, 3, 4, 5].map((star) => (
                   <Star 

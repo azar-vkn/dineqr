@@ -21,6 +21,7 @@ interface Order {
   status: "pending" | "preparing" | "ready" | "served" | "cancelled";
   paymentStatus: string;
   paymentMethod?: string;
+  customerName?: string;
   createdAt: any;
 }
 
@@ -275,6 +276,9 @@ export default function AdminDashboard() {
                     <span className="text-sm font-medium text-stone-500 uppercase tracking-wider">Table</span>
                     <span className="text-3xl font-black text-emerald-900">{order.tableNumber}</span>
                   </div>
+                  {order.customerName && order.customerName !== "Guest" && (
+                    <p className="text-xs font-bold text-stone-600 uppercase tracking-wider mt-0.5">{order.customerName}</p>
+                  )}
                   <p className="text-xs text-stone-400 mt-1">
                     {order.createdAt?.toDate ? new Date(order.createdAt.toDate()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'Just now'}
                   </p>
