@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
 import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
 import { db } from "../firebase";
-import { Loader2, TrendingUp, IndianRupee, ShoppingBag, Users, Utensils } from "lucide-react";
+import { Loader2, TrendingUp, IndianRupee, ShoppingBag, Users, Utensils, Send } from "lucide-react";
+import { toast } from "sonner";
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
+import { sendRevenueReport, ReportStats } from "../lib/email";
 import {
   LineChart,
   Line,
@@ -42,6 +44,7 @@ export default function AdminStats() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<"today" | "week" | "month" | "all">("today");
+  const [sendingEmail, setSendingEmail] = useState(false);
 
   useEffect(() => {
     const q = query(collection(db, "orders"), orderBy("createdAt", "desc"));
@@ -143,6 +146,31 @@ export default function AdminStats() {
   const paymentMethodsData = Array.from(paymentMethodsMap.entries())
     .map(([name, value]) => ({ name, value }));
 
+  const handleSendEmail = async () => {
+    setSendingEmail(true);
+    try {
+      const stats: ReportStats = {
+        period: timeRange === "today" ? new Date().toLocaleDateString() : `Last ${timeRange}`,
+        totalRevenue,
+        totalOrders: totalOrdersCount,
+        completedOrders: completedOrders.length,
+        cancelledOrders: filteredOrders.length - completedOrders.length,
+        averageOrderValue,
+        topItems: popularItemsData,
+      };
+      await sendRevenueReport(stats);
+      toast.success("Revenue report sent successfully to your email!");
+    } catch (error: any) {
+      if (error.message?.includes("credentials not configured")) {
+        toast.error("Please configure EmailJS credentials in src/lib/email.ts first.");
+      } else {
+        toast.error("Failed to send email. Check console for details.");
+      }
+    } finally {
+      setSendingEmail(false);
+    }
+  };
+
   return (
     <div className="max-w-6xl mx-auto space-y-8 pb-12">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -151,20 +179,31 @@ export default function AdminStats() {
           <p className="text-stone-500 mt-1">Track your restaurant's performance and sales.</p>
         </div>
         
-        <div className="flex bg-white rounded-xl border border-stone-200 p-1 shadow-sm">
-          {(["today", "week", "month", "all"] as const).map((range) => (
-            <button
-              key={range}
-              onClick={() => setTimeRange(range)}
-              className={`px-4 py-2 text-sm font-medium rounded-lg capitalize transition-colors ${
-                timeRange === range 
-                  ? "bg-emerald-50 text-emerald-800" 
-                  : "text-stone-500 hover:text-stone-800"
-              }`}
-            >
-              {range}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-4">
+          <button 
+            onClick={handleSendEmail}
+            disabled={sendingEmail}
+            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl transition-colors disabled:opacity-50 shadow-sm"
+          >
+            {sendingEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            Email Report
+          </button>
+          
+          <div className="flex bg-white rounded-xl border border-stone-200 p-1 shadow-sm">
+            {(["today", "week", "month", "all"] as const).map((range) => (
+              <button
+                key={range}
+                onClick={() => setTimeRange(range)}
+                className={`px-4 py-2 text-sm font-medium rounded-lg capitalize transition-colors ${
+                  timeRange === range 
+                    ? "bg-emerald-50 text-emerald-800" 
+                    : "text-stone-500 hover:text-stone-800"
+                }`}
+              >
+                {range}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 

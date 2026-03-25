@@ -18,7 +18,7 @@ const razorpay = new Razorpay({
 
 export const createOrder = onCall(async (request) => {
   try {
-    const { items, tableNumber } = request.data;
+    const { items, tableNumber, customerName } = request.data;
     
     if (!items || !Array.isArray(items) || items.length === 0) {
       throw new HttpsError("invalid-argument", "Cart items are required");
@@ -66,6 +66,7 @@ export const createOrder = onCall(async (request) => {
     // Create Firestore Order with pending status
     const newOrderRef = await db.collection("orders").add({
       tableNumber,
+      customerName: customerName || "Guest",
       items: orderItems,
       total: finalAmount,
       status: "pending",
@@ -136,7 +137,7 @@ export const verifyPayment = onCall(async (request) => {
 // For pure cash orders (bypass Razorpay)
 export const createCashOrder = onCall(async (request) => {
   try {
-    const { items, tableNumber } = request.data;
+    const { items, tableNumber, customerName } = request.data;
     
     // ... same secure calculation as above ...
     let calculatedTotal = 0;
@@ -161,6 +162,7 @@ export const createCashOrder = onCall(async (request) => {
 
     const newOrderRef = await db.collection("orders").add({
       tableNumber: tableNumber || "Unknown",
+      customerName: customerName || "Guest",
       items: orderItems,
       total: finalAmount,
       status: "pending",

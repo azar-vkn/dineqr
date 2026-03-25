@@ -11,6 +11,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@emailjs/browser": "^4.4.1",
     "clsx": "^2.1.1",
     "firebase": "^12.11.0",
     "lucide-react": "^0.546.0",

@@ -1,16 +1,17 @@
-import { ReactNode } from "react";
+import { ReactNode, useState } from "react";
 import { ShoppingBag, UtensilsCrossed, AlertCircle } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useCartStore } from "../store";
 
 export default function Layout({ children }: { children: ReactNode }) {
-  const { items, tableNumber } = useCartStore();
+  const { items, tableNumber, customerName, setCustomerName } = useCartStore();
   const location = useLocation();
+  const [nameInput, setNameInput] = useState("");
   
   const itemCount = items.reduce((acc, item) => acc + item.quantity, 0);
   const isCartPage = location.pathname === "/cart" || location.pathname === "/checkout";
 
-  // If there's no table number and we are not on the menu page (which sets it), show an error
+  // If there's no table number and we are not on the menu page or order tracking page, show an error
   if (!tableNumber && !location.pathname.startsWith("/table/") && !location.pathname.startsWith("/order/")) {
     return (
       <div className="min-h-screen bg-stone-50 flex flex-col items-center justify-center p-4 text-center">
@@ -21,6 +22,46 @@ export default function Layout({ children }: { children: ReactNode }) {
         <p className="text-stone-500 max-w-md">
           We couldn't identify your table. Please scan the QR code on your table to view the menu and place an order.
         </p>
+      </div>
+    );
+  }
+
+  // If we have a table number or are entering one, but no customer name
+  const isCustomerRoute = location.pathname.startsWith("/table/") || location.pathname.startsWith("/order/") || location.pathname === "/cart" || location.pathname === "/checkout";
+  if (!customerName && isCustomerRoute) {
+    return (
+      <div className="min-h-screen bg-stone-50 flex flex-col items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-200 max-w-sm w-full space-y-6 animate-in fade-in zoom-in duration-300">
+          <div className="w-16 h-16 bg-emerald-100 text-emerald-800 rounded-full flex items-center justify-center mx-auto mb-2">
+            <UtensilsCrossed className="w-8 h-8" />
+          </div>
+          <div className="text-center space-y-2">
+            <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Welcome to DineQR</h1>
+            <p className="text-stone-500">Please enter your name to view the menu and place your order.</p>
+          </div>
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            if (nameInput.trim()) {
+              setCustomerName(nameInput.trim());
+            }
+          }} className="space-y-4 pt-2">
+            <input
+              type="text"
+              required
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              placeholder="Your Name"
+              className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-medium text-stone-800"
+            />
+            <button
+              type="submit"
+              disabled={!nameInput.trim()}
+              className="w-full py-3 bg-emerald-800 text-white font-medium rounded-xl hover:bg-emerald-900 transition-colors disabled:opacity-50"
+            >
+              Continue to Menu
+            </button>
+          </form>
+        </div>
       </div>
     );
   }
@@ -36,7 +77,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           
           <div className="flex items-center gap-4">
             {tableNumber && (
-              <div className="text-sm font-black bg-emerald-100 px-4 py-1.5 rounded-full text-emerald-800 border border-emerald-200 shadow-sm">
+              <div className="text-sm font-black bg-emerald-100 px-4 py-1.5 rounded-full text-emerald-800 border border-emerald-200 shadow-sm whitespace-nowrap">
                 Table {tableNumber}
               </div>
             )}

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, getDoc, doc } from "firebase/firestore";
 import { db } from "../firebase";
 import { Loader2, Clock, Search, Filter, ChevronDown, ChevronUp, Calendar } from "lucide-react";
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
@@ -20,6 +20,7 @@ interface Order {
   status: "pending" | "preparing" | "ready" | "served" | "cancelled";
   paymentStatus: string;
   paymentMethod?: string;
+  customerName?: string;
   createdAt: any;
 }
 
@@ -31,8 +32,22 @@ export default function AdminHistory() {
   const [paymentFilter, setPaymentFilter] = useState<string>("all");
   const [dateFilter, setDateFilter] = useState<string>("");
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
+  const [feedbacks, setFeedbacks] = useState<Record<string, { rating: number, comment?: string } | null>>({});
   const [sortField, setSortField] = useState<"date" | "total" | "table">("date");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+
+  // Fetch feedback when an order is expanded
+  useEffect(() => {
+    if (expandedOrder && feedbacks[expandedOrder] === undefined) {
+      getDoc(doc(db, "feedback", expandedOrder)).then(snap => {
+        if (snap.exists()) {
+          setFeedbacks(prev => ({ ...prev, [expandedOrder]: snap.data() as any }));
+        } else {
+          setFeedbacks(prev => ({ ...prev, [expandedOrder]: null }));
+        }
+      }).catch(err => console.error("Error fetching feedback:", err));
+    }
+  }, [expandedOrder, feedbacks]);
 
   useEffect(() => {
     const q = query(collection(db, "orders"), orderBy("createdAt", "desc"));
@@ -327,20 +342,41 @@ export default function AdminHistory() {
                       </div>
                     </td>
                     <td className="p-4">
-                      <span className="font-black text-emerald-900 text-lg">{order.tableNumber}</span>
+                      <div className="flex flex-col">
+                        <span className="font-black text-emerald-900 text-lg">{order.tableNumber}</span>
+                        {order.customerName && order.customerName !== "Guest" && (
+                          <span className="text-[10px] text-stone-500 font-bold uppercase tracking-wider">{order.customerName}</span>
+                        )}
+                      </div>
                     </td>
                     <td className="p-4">
                       {expandedOrder === order.id ? (
-                        <div className="space-y-1.5 animate-in fade-in duration-200">
-                          {order.items.map((item, idx) => (
-                            <div key={idx} className="flex justify-between text-sm gap-4">
-                              <span className="text-stone-700">
-                                <span className="text-stone-400 mr-1.5">{item.quantity}×</span>
-                                {item.name}
-                              </span>
-                              <span className="text-stone-500 whitespace-nowrap">₹{item.price * item.quantity}</span>
+                        <div className="space-y-4 animate-in fade-in duration-200">
+                          <div className="space-y-1.5">
+                            {order.items.map((item, idx) => (
+                              <div key={idx} className="flex justify-between text-sm gap-4">
+                                <span className="text-stone-700">
+                                  <span className="text-stone-400 mr-1.5">{item.quantity}×</span>
+                                  {item.name}
+                                </span>
+                                <span className="text-stone-500 whitespace-nowrap">₹{item.price * item.quantity}</span>
+                              </div>
+                            ))}
+                          </div>
+                          
+                          {feedbacks[order.id] && (
+                            <div className="pt-3 border-t border-stone-100">
+                              <div className="flex items-center gap-1 mb-1">
+                                {[1, 2, 3, 4, 5].map(star => (
+                                  <span key={star} className={`text-base leading-none tracking-tighter ${star <= feedbacks[order.id]!.rating ? "text-amber-400" : "text-stone-200"}`}>★</span>
+                                ))}
+                                <span className="text-[10px] uppercase tracking-wider font-bold text-stone-400 ml-2">Rating</span>
+                              </div>
+                              {feedbacks[order.id]!.comment && (
+                                <p className="text-sm text-stone-600 italic bg-stone-50 p-2.5 rounded-lg border border-stone-100 mt-1.5">"{feedbacks[order.id]!.comment}"</p>
+                              )}
                             </div>
-                          ))}
+                          )}
                         </div>
                       ) : (
                         <p className="text-sm text-stone-600 truncate max-w-[200px]">

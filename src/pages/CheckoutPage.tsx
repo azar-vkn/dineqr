@@ -8,7 +8,7 @@ import { Loader2, CreditCard, CheckCircle2, QrCode, Smartphone, ShieldCheck } fr
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
 
 export default function CheckoutPage() {
-  const { items, getTotal, tableNumber, clearCart } = useCartStore();
+  const { items, getTotal, tableNumber, customerName, clearCart } = useCartStore();
   const navigate = useNavigate();
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -32,7 +32,11 @@ export default function CheckoutPage() {
     setIsProcessingCash(true);
     try {
       const createCashOrder = httpsCallable(functions, "createCashOrder");
-      const result = await createCashOrder({ items, tableNumber });
+      const result = await createCashOrder({ 
+        items, 
+        tableNumber,
+        customerName: customerName || "Guest" 
+      });
       const data = result.data as any;
 
       setOrderId(data.orderId);
@@ -51,7 +55,11 @@ export default function CheckoutPage() {
     setIsProcessingPayment(true);
     try {
       const createOrder = httpsCallable(functions, "createOrder");
-      const { data } = await createOrder({ items, tableNumber });
+      const { data } = await createOrder({ 
+        items, 
+        tableNumber,
+        customerName: customerName || "Guest"
+      });
       const orderData = data as any;
 
       const options = {
