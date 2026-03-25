@@ -143,9 +143,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   ].filter(link => link.roles.includes(role));
 
   return (
-    <div className="min-h-screen bg-stone-50 flex flex-col md:flex-row font-sans">
+    <div className="min-h-screen bg-stone-50 flex flex-col md:flex-row font-sans print:bg-white print:block">
       {/* Sidebar */}
-      <aside className="w-full md:w-64 bg-white border-r border-stone-200 p-4 flex flex-col shrink-0 md:sticky md:top-0 md:h-screen overflow-y-auto">
+      <aside className="w-full md:w-64 bg-white border-r border-stone-200 p-4 flex flex-col shrink-0 md:sticky md:top-0 md:h-screen overflow-y-auto print:hidden">
         <div className="flex items-center gap-2 text-emerald-800 mb-8 px-4 pt-4">
           <UtensilsCrossed className="w-6 h-6" />
           <span className="font-bold text-xl tracking-tight">DineQR Admin</span>
@@ -188,7 +188,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       </aside>
       
       {/* Main Content */}
-      <main className="flex-1 p-4 sm:p-8 overflow-y-auto">
+      <main className="flex-1 p-4 sm:p-8 overflow-y-auto print:overflow-visible print:p-0">
         {children}
       </main>
     </div>
