@@ -90,7 +90,7 @@ export default function AdminQR() {
                     className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-emerald-50 text-emerald-800 font-medium rounded-xl hover:bg-emerald-100 transition-colors text-sm shadow-sm"
                   >
                     <Link2 className="w-4 h-4" />
-                    Visit
+                    Order
                   </a>
                   <button 
                     onClick={() => handlePrintSingle(tableNumber)}
