@@ -1,0 +1,5 @@
+{
+  "name": "DineQR - Smart Restaurant Ordering",
+  "description": "A modern, QR-based restaurant ordering system with a customer menu, cart, and live admin dashboard.",
+  "requestFramePermissions": []
+}

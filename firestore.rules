@@ -1,0 +1,133 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: menu
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required)
+    //   - description: string (optional)
+    //   - price: number (required, > 0)
+    //   - category: string (required, enum: Starters, Main Course, Drinks, Desserts)
+    //   - image: string (optional, URL)
+    //   - available: boolean (required)
+    //
+    // Collection: orders
+    // Document ID: auto-generated
+    // Fields:
+    //   - tableNumber: string (required)
+    //   - items: list of objects (required)
+    //   - total: number (required, > 0)
+    //   - status: string (required, enum: pending, preparing, ready, served, cancelled)
+    //   - paymentStatus: string (required, enum: paid, failed, pending_collection)
+    //   - paymentMethod: string (required, enum: cash, upi)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: users
+    // Document ID: user UID
+    // Fields:
+    //   - email: string (required)
+    //   - role: string (required, enum: admin, staff)
+    //   - createdAt: timestamp (required)
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isBootstrapAdmin() {
+      return isAuthenticated() && request.auth.token.email == "asirselvin446@gmail.com";
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == "asirselvin446@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.token.email)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.token.email)).data.role == 'admin')
+      );
+    }
+
+    function isStaff() {
+      return isAdmin() || (
+        isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.token.email)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.token.email)).data.role == 'staff'
+      );
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'role', 'createdAt']) &&
+             data.email is string && data.email.size() > 0 &&
+             data.role in ['admin', 'staff'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidMenuItem(data) {
+      return data.keys().hasAll(['name', 'price', 'category', 'available']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.price is number && data.price >= 0 &&
+             data.category in ['Starters', 'Main Course', 'Drinks', 'Desserts'] &&
+             data.available is bool &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 500)) &&
+             (!('image' in data) || (data.image is string && data.image.size() <= 1000));
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll(['tableNumber', 'items', 'total', 'status', 'paymentStatus', 'createdAt']) &&
+             data.tableNumber is string && data.tableNumber.size() > 0 && data.tableNumber.size() < 20 &&
+             data.items is list && data.items.size() > 0 && data.items.size() <= 50 &&
+             data.total is number && data.total >= 0 &&
+             data.status in ['pending', 'preparing', 'ready', 'served', 'cancelled'] &&
+             data.paymentStatus in ['paid', 'failed', 'pending_collection'] &&
+             (!('paymentMethod' in data) || data.paymentMethod in ['cash', 'upi']) &&
+             data.createdAt is timestamp;
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      // Users can read their own profile (by email or uid), admins can read all
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        request.auth.token.email == userId ||
+        resource.data.email == request.auth.token.email ||
+        isAdmin()
+      );
+      // Only admins can create/update users
+      // Prevent users from escalating their own privileges
+      allow create: if isAdmin() && isValidUser(request.resource.data);
+      allow update: if isAdmin() && isValidUser(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Menu Collection
+    match /menu/{itemId} {
+      // Anyone can read the menu
+      allow read: if true;
+      // Only admins can create, update, delete menu items
+      allow create: if isAdmin() && isValidMenuItem(request.resource.data);
+      allow update: if isAdmin() && isValidMenuItem(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Orders Collection
+    match /orders/{orderId} {
+      // Anyone can create an order (since customers are not authenticated)
+      // Enforce server timestamp to prevent manipulation
+      allow create: if isValidOrder(request.resource.data)
+                    && request.resource.data.createdAt == request.time;
+      
+      // Anyone can GET a single order by ID (for tracking via URL)
+      // Only staff/admin can LIST (query) all orders
+      allow get: if true;
+      allow list: if isStaff();
+      allow update: if isStaff() && isValidOrder(request.resource.data);
+      allow delete: if isAdmin();
+    }
+  }
+}
