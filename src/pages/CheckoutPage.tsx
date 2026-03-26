@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { useCartStore } from "../store";
 import { useNavigate } from "react-router-dom";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import { db } from "../firebase";
+import { httpsCallable } from "firebase/functions";
+import { db, functions } from "../firebase";
 import { toast } from "sonner";
 import { Loader2, CreditCard, CheckCircle2, QrCode, Smartphone } from "lucide-react";
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
@@ -85,7 +86,20 @@ export default function CheckoutPage() {
   const handleCashOrder = async () => {
     setIsProcessingCash(true);
     try {
-      await handlePaymentSuccess("pending_collection");
+      const createCashOrder = httpsCallable(functions, "createCashOrder");
+      const result = await createCashOrder({ 
+        items, 
+        tableNumber,
+        customerName: customerName || "Guest" 
+      });
+      const data = result.data as any;
+
+      setOrderPlaced(true);
+      clearCart();
+      toast.success("Order placed! Please pay at the counter.");
+      navigate(`/order/${data.orderId}`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, "orders");
     } finally {
       setIsProcessingCash(false);
     }
