@@ -118,9 +118,11 @@ service cloud.firestore {
 
     // Orders Collection
     match /orders/{orderId} {
-      // Orders MUST be created securely via the backend Cloud Function 
-      // preventing malicious users from spoofing prices or payment status.
-      allow create: if false;
+      // Client-side order creation with strict validation (Spark plan — no Cloud Functions)
+      // Staff can verify payment IDs against Razorpay dashboard
+      allow create: if isValidOrder(request.resource.data)
+                    && request.resource.data.status == 'pending'
+                    && request.resource.data.createdAt == request.time;
       
       // Anyone can GET a single order by ID (for tracking via URL)
       // Only staff/admin can LIST (query) all orders

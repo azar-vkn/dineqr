@@ -1,10 +1,10 @@
 {
-  "projectId": "dineqr-official",
-  "appId": "1:687481381461:web:2c57735130e932d5962adc",
-  "apiKey": "AIzaSyA9ET2smDKFPD9rDiXbYrSKy-KwxnCFSsY",
-  "authDomain": "dineqr-official.firebaseapp.com",
-  "firestoreDatabaseId": "(default)",
-  "storageBucket": "dineqr-official.firebasestorage.app",
-  "messagingSenderId": "687481381461",
-  "measurementId": ""
+  "projectId": "gen-lang-client-0683754671",
+  "appId": "1:1009551686361:web:0591e5f30b3bfd5db11cc8",
+  "storageBucket": "gen-lang-client-0683754671.firebasestorage.app",
+  "apiKey": "AIzaSyDUXsKdOnVuWAwtlxGeCpKmA9DJ1JwBq-E",
+  "authDomain": "gen-lang-client-0683754671.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-59943d32-4256-4962-9722-8ed736fd2e8e",
+  "messagingSenderId": "1009551686361",
+  "projectNumber": "1009551686361"
 }

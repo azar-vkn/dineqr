@@ -1,15 +1,17 @@
 import { ReactNode, useState } from "react";
-import { ShoppingBag, UtensilsCrossed, AlertCircle } from "lucide-react";
+import { ShoppingBag, UtensilsCrossed, AlertCircle, ClipboardList, X } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useCartStore } from "../store";
 
 export default function Layout({ children }: { children: ReactNode }) {
-  const { items, tableNumber, customerName, setCustomerName } = useCartStore();
+  const { items, tableNumber, customerName, setCustomerName, lastOrderId, setLastOrderId } = useCartStore();
   const location = useLocation();
   const [nameInput, setNameInput] = useState("");
   
   const itemCount = items.reduce((acc, item) => acc + item.quantity, 0);
   const isCartPage = location.pathname === "/cart" || location.pathname === "/checkout";
+  const isTrackingPage = location.pathname.startsWith("/order/");
+  const showTrackBanner = lastOrderId && !isTrackingPage;
 
   // If there's no table number and we are not on the menu page or order tracking page, show an error
   if (!tableNumber && !location.pathname.startsWith("/table/") && !location.pathname.startsWith("/order/")) {
@@ -95,6 +97,39 @@ export default function Layout({ children }: { children: ReactNode }) {
           </div>
         </div>
       </header>
+
+      {/* Floating Track Order Banner */}
+      {showTrackBanner && (
+        <div className="max-w-3xl mx-auto px-4 pt-3">
+          <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3 flex items-center justify-between gap-3 animate-in slide-in-from-top-4 duration-300">
+            <Link
+              to={`/order/${lastOrderId}`}
+              className="flex items-center gap-3 flex-1 min-w-0"
+            >
+              <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center shrink-0">
+                <ClipboardList className="w-5 h-5 text-emerald-700" />
+              </div>
+              <div className="min-w-0">
+                <p className="font-semibold text-emerald-900 text-sm">Track Your Order</p>
+                <p className="text-xs text-emerald-600 truncate">Tap to view your live order status</p>
+              </div>
+            </Link>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+              </span>
+              <button
+                onClick={() => setLastOrderId(null)}
+                className="p-1.5 text-emerald-400 hover:text-emerald-700 transition-colors rounded-lg hover:bg-emerald-100"
+                aria-label="Dismiss"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       
       <main className="max-w-3xl mx-auto px-4 py-6">
         {children}

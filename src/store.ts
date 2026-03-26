@@ -12,9 +12,11 @@ export interface CartItem {
 interface CartState {
   tableNumber: string | null;
   customerName: string | null;
+  lastOrderId: string | null;
   items: CartItem[];
   setTableNumber: (tableNumber: string) => void;
   setCustomerName: (name: string) => void;
+  setLastOrderId: (orderId: string | null) => void;
   addItem: (item: Omit<CartItem, 'quantity'>) => void;
   removeItem: (id: string) => void;
   updateQuantity: (id: string, quantity: number) => void;
@@ -27,9 +29,17 @@ export const useCartStore = create<CartState>()(
     (set, get) => ({
       tableNumber: null,
       customerName: null,
+      lastOrderId: null,
       items: [],
-      setTableNumber: (tableNumber) => set({ tableNumber }),
+      setTableNumber: (tableNumber) => set((state) => {
+        // If switching to a different table, clear everything to prevent cross-contamination
+        if (state.tableNumber && state.tableNumber !== tableNumber) {
+          return { tableNumber, customerName: null, lastOrderId: null, items: [] };
+        }
+        return { tableNumber };
+      }),
       setCustomerName: (customerName) => set({ customerName }),
+      setLastOrderId: (lastOrderId) => set({ lastOrderId }),
       addItem: (item) => set((state) => {
         const existingItem = state.items.find(i => i.id === item.id);
         if (existingItem) {
@@ -54,7 +64,7 @@ export const useCartStore = create<CartState>()(
           )
         };
       }),
-      clearCart: () => set({ items: [] }),
+      clearCart: () => set({ items: [] }),  // Note: lastOrderId is intentionally NOT cleared here
       getTotal: () => {
         const { items } = get();
         return items.reduce((total, item) => total + (item.price * item.quantity), 0);

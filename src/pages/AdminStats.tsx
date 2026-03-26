@@ -35,6 +35,7 @@ interface Order {
   total: number;
   status: "pending" | "preparing" | "ready" | "served" | "cancelled";
   paymentStatus: string;
+  paymentMethod?: string;
   createdAt: any;
 }
 
@@ -139,7 +140,7 @@ export default function AdminStats() {
   // Prepare data for Payment Methods Chart
   const paymentMethodsMap = new Map<string, number>();
   completedOrders.forEach(order => {
-    const method = order.paymentStatus === "paid" ? "Online" : "Cash";
+    const method = order.paymentMethod === "cash" ? "Cash" : "Online";
     paymentMethodsMap.set(method, (paymentMethodsMap.get(method) || 0) + 1);
   });
 
