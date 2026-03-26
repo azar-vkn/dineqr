@@ -4,9 +4,9 @@ import emailjs from '@emailjs/browser';
 // EMAILJS CONFIGURATION
 // Create a free account at https://emailjs.com
 // ==========================================
-export const EMAILJS_SERVICE_ID = "service_7djjfmf";
-export const EMAILJS_TEMPLATE_ID = "template_71w3mwb";
-export const EMAILJS_PUBLIC_KEY = "krI1g2KfxCu5nmVbl";
+export const EMAILJS_SERVICE_ID = "YOUR_SERVICE_ID";
+export const EMAILJS_TEMPLATE_ID = "YOUR_TEMPLATE_ID";
+export const EMAILJS_PUBLIC_KEY = "YOUR_PUBLIC_KEY";
 
 export interface ReportStats {
   period: string;
@@ -19,6 +19,10 @@ export interface ReportStats {
 }
 
 export const sendRevenueReport = async (stats: ReportStats, toEmail?: string) => {
+  if (EMAILJS_SERVICE_ID === "YOUR_SERVICE_ID") {
+    throw new Error("EmailJS credentials not configured! Please open src/lib/email.ts and add your keys.");
+  }
+
   const templateParams = {
     to_email: toEmail || "admin@example.com", // You can configure this in your EmailJS template instead
     report_period: stats.period,
