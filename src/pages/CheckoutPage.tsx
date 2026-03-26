@@ -1,21 +1,30 @@
 import { useState, useEffect } from "react";
 import { useCartStore } from "../store";
 import { useNavigate } from "react-router-dom";
-import { httpsCallable } from "firebase/functions";
-import { functions } from "../firebase";
+import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { db } from "../firebase";
 import { toast } from "sonner";
-import { Loader2, CreditCard, CheckCircle2, QrCode, Smartphone, ShieldCheck } from "lucide-react";
+import { Loader2, CreditCard, CheckCircle2, QrCode, Smartphone } from "lucide-react";
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
+import { QRCodeSVG } from "qrcode.react";
+import { sanitizeText, validateOrderItems } from "../lib/sanitize";
+
+declare global {
+  interface Window {
+    Razorpay: any;
+  }
+}
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 export default function CheckoutPage() {
   const { items, getTotal, tableNumber, customerName, clearCart } = useCartStore();
   const navigate = useNavigate();
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [paymentMethod, setPaymentMethod] = useState<"upi" | "cash">("upi");
+  const [paymentMethod, setPaymentMethod] = useState<"online" | "cash">("online");
   const [isProcessingCash, setIsProcessingCash] = useState(false);
-  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
-  const [orderId, setOrderId] = useState<string | null>(null);
+  const [isProcessingOnline, setIsProcessingOnline] = useState(false);
 
   const total = getTotal();
   const finalAmount = Math.round(total * 1.05); // Including 5% tax
@@ -28,90 +37,121 @@ export default function CheckoutPage() {
     setLoading(false);
   }, [items, navigate, orderPlaced]);
 
+  const handlePaymentSuccess = async (method: "paid" | "pending_collection" = "paid", paymentId?: string) => {
+    // --- STRICT FRONTEND VALIDATION ---
+    const safeTableNumber = sanitizeText(tableNumber || "Unknown");
+    const safeCustomerName = sanitizeText(customerName || "Guest");
+
+    if (!safeTableNumber || safeTableNumber.length > 20) {
+      toast.error("Invalid table number. Please scan the QR code again.");
+      return;
+    }
+
+    if (!validateOrderItems(items)) {
+      toast.error("Your cart contains invalid items. Please clear your cart and try again.");
+      return;
+    }
+
+    // Recalculate total from actual item data to prevent local manipulation
+    const recalculatedTotal = Math.round(
+      items.reduce((sum, item) => sum + item.price * item.quantity, 0) * 1.05
+    );
+
+    try {
+      const docRef = await addDoc(collection(db, "orders"), {
+        tableNumber: safeTableNumber,
+        customerName: safeCustomerName,
+        items: items.map(item => ({
+          id: item.id,
+          name: sanitizeText(item.name),
+          price: Math.abs(item.price),
+          quantity: Math.max(1, Math.min(50, Math.floor(item.quantity)))
+        })),
+        total: recalculatedTotal,
+        status: "pending",
+        paymentStatus: method,
+        paymentMethod: method === "pending_collection" ? "cash" : "online",
+        ...(paymentId ? { paymentId } : {}),
+        createdAt: serverTimestamp()
+      });
+
+      setOrderPlaced(true);
+      clearCart();
+      toast.success("Order placed successfully!");
+      navigate(`/order/${docRef.id}`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, "orders");
+    }
+  };
+
   const handleCashOrder = async () => {
     setIsProcessingCash(true);
     try {
-      const createCashOrder = httpsCallable(functions, "createCashOrder");
-      const result = await createCashOrder({ 
-        items, 
-        tableNumber,
-        customerName: customerName || "Guest" 
-      });
-      const data = result.data as any;
-
-      setOrderId(data.orderId);
-      setOrderPlaced(true);
-      clearCart();
-      toast.success("Order placed! Please pay at the counter.");
-      navigate(`/order/${data.orderId}`);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, "orders");
+      await handlePaymentSuccess("pending_collection");
     } finally {
       setIsProcessingCash(false);
     }
   };
 
-  const initRazorpayPayment = async () => {
-    setIsProcessingPayment(true);
+  const handleOnlinePayment = async () => {
+    setIsProcessingOnline(true);
     try {
-      const createOrder = httpsCallable(functions, "createOrder");
-      const { data } = await createOrder({ 
-        items, 
-        tableNumber,
-        customerName: customerName || "Guest"
+      const response = await fetch(`${API_BASE_URL}/api/payment/create-order`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: finalAmount, currency: "INR" })
       });
-      const orderData = data as any;
+
+      if (!response.ok) throw new Error("Failed to create order");
+      
+      const order = await response.json();
 
       const options = {
-        key: orderData.keyId,
-        amount: orderData.amount,
-        currency: orderData.currency,
+        key: order.key_id,
+        amount: order.amount,
+        currency: order.currency,
         name: "DineQR",
         description: `Order for Table ${tableNumber}`,
-        order_id: orderData.razorpayOrderId,
-        handler: async function (response: any) {
+        order_id: order.id,
+        handler: async function (paymentRes: any) {
           try {
-            toast.loading("Verifying payment...");
-            const verifyPayment = httpsCallable(functions, "verifyPayment");
-            
-            await verifyPayment({
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature,
-              firestore_order_id: orderData.orderId,
+            const verifyResponse = await fetch(`${API_BASE_URL}/api/payment/verify`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(paymentRes)
             });
-
-            toast.dismiss();
-            toast.success("Payment successful!");
-            setOrderId(orderData.orderId);
-            setOrderPlaced(true);
-            clearCart();
-            navigate(`/order/${orderData.orderId}`);
-          } catch (e) {
-            toast.dismiss();
-            toast.error("Payment verification failed. Please contact staff.");
+            
+            const verifyData = await verifyResponse.json();
+            if (verifyData.success) {
+              await handlePaymentSuccess("paid", paymentRes.razorpay_payment_id);
+            } else {
+              toast.error("Payment verification failed. Please contact staff.");
+            }
+          } catch (err) {
+            console.error(err);
+            toast.error("Error verifying payment.");
           }
         },
         prefill: {
-          name: "Guest",
+          name: customerName || "Guest",
           email: "guest@example.com",
-          contact: "9999999999",
+          contact: "9999999999"
         },
         theme: {
-          color: "#059669",
-        },
+          color: "#059669"
+        }
       };
 
-      const razorpayInstance = new (window as any).Razorpay(options);
-      razorpayInstance.on('payment.failed', function (response: any){
-        toast.error(`Payment failed: ${response.error.description}`);
+      const rzp = new window.Razorpay(options);
+      rzp.on("payment.failed", function (failRes: any) {
+        toast.error(`Payment Failed: ${failRes.error.description}`);
       });
-      razorpayInstance.open();
-
+      rzp.open();
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, "orders");
+      console.error(error);
+      toast.error("Could not initiate payment. Please try again.");
     } finally {
-      setIsProcessingPayment(false);
+      setIsProcessingOnline(false);
     }
   };
 
@@ -138,10 +178,10 @@ export default function CheckoutPage() {
 
       <div className="flex gap-4 p-1 bg-stone-100 rounded-xl">
         <button 
-          onClick={() => setPaymentMethod("upi")}
-          className={`flex-1 py-3 rounded-lg font-medium transition-all ${paymentMethod === "upi" ? "bg-white shadow-sm text-emerald-800" : "text-stone-500 hover:text-stone-700"}`}
+          onClick={() => setPaymentMethod("online")}
+          className={`flex-1 py-3 rounded-lg font-medium transition-all ${paymentMethod === "online" ? "bg-white shadow-sm text-emerald-800" : "text-stone-500 hover:text-stone-700"}`}
         >
-          Pay Securely (Online)
+          Pay Online
         </button>
         <button 
           onClick={() => setPaymentMethod("cash")}
@@ -179,7 +219,7 @@ export default function CheckoutPage() {
         </div>
       ) : (
         <div className="animate-in fade-in duration-300">
-          {loading ? (
+          {isProcessingOnline || loading ? (
             <div className="flex flex-col items-center justify-center py-12">
               <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mb-4" />
               <p className="text-stone-500">Initializing secure payment...</p>
@@ -188,22 +228,17 @@ export default function CheckoutPage() {
             <div className="space-y-6">
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 text-center space-y-4">
                 <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
-                  <ShieldCheck className="w-8 h-8" />
+                  <CreditCard className="w-8 h-8" />
                 </div>
-                <h3 className="font-bold text-lg">Secure Online Payment</h3>
-                <p className="text-sm text-stone-500">Pay securely using UPI, Credit/Debit card, Netbanking, or Wallets powered by Razorpay.</p>
+                <h3 className="font-bold text-lg">Online Payment</h3>
+                <p className="text-sm text-stone-500">Pay securely using UPI, Cards, Wallets, or NetBanking.</p>
               </div>
 
               <button
-                onClick={initRazorpayPayment}
-                disabled={isProcessingPayment}
-                className="w-full py-4 bg-emerald-800 text-white font-bold rounded-2xl hover:bg-emerald-900 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                onClick={handleOnlinePayment}
+                className="w-full py-4 bg-emerald-800 text-white font-bold rounded-2xl hover:bg-emerald-900 transition-colors flex items-center justify-center gap-2"
               >
-                {isProcessingPayment ? (
-                  <><Loader2 className="w-5 h-5 animate-spin" /> Initializing...</>
-                ) : (
-                  <><CreditCard className="w-5 h-5" /> Pay ₹{finalAmount} Securely</>
-                )}
+                <CreditCard className="w-5 h-5" /> Pay ₹{finalAmount} Online
               </button>
             </div>
           )}

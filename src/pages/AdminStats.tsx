@@ -164,7 +164,8 @@ export default function AdminStats() {
       if (error.message?.includes("credentials not configured")) {
         toast.error("Please configure EmailJS credentials in src/lib/email.ts first.");
       } else {
-        toast.error("Failed to send email. Check console for details.");
+        const emailjsError = error.text || error.message || JSON.stringify(error);
+        toast.error(`Failed to send email: ${emailjsError}`);
       }
     } finally {
       setSendingEmail(false);

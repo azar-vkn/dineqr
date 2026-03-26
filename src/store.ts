@@ -28,14 +28,20 @@ export const useCartStore = create<CartState>()(
       tableNumber: null,
       customerName: null,
       items: [],
-      setTableNumber: (tableNumber) => set({ tableNumber }),
+      setTableNumber: (tableNumber) => set((state) => {
+        if (state.tableNumber !== null && state.tableNumber !== tableNumber) {
+          return { tableNumber, items: [] };
+        }
+        return { tableNumber };
+      }),
       setCustomerName: (customerName) => set({ customerName }),
       addItem: (item) => set((state) => {
+        if (item.price < 0) return state; // Reject negative prices
         const existingItem = state.items.find(i => i.id === item.id);
         if (existingItem) {
           return {
             items: state.items.map(i => 
-              i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i
+              i.id === item.id ? { ...i, quantity: Math.min(50, i.quantity + 1) } : i
             )
           };
         }
@@ -48,9 +54,10 @@ export const useCartStore = create<CartState>()(
         if (quantity <= 0) {
           return { items: state.items.filter(i => i.id !== id) };
         }
+        const clampedQuantity = Math.min(50, Math.floor(quantity));
         return {
           items: state.items.map(i => 
-            i.id === id ? { ...i, quantity } : i
+            i.id === id ? { ...i, quantity: clampedQuantity } : i
           )
         };
       }),
