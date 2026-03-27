@@ -24,13 +24,13 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/admin/qr" replace />} />
           
-          {/* Customer Routes */}
+          {/* Customer Routes — public, no auth required */}
           <Route path="/table/:tableId" element={<Layout><MenuPage /></Layout>} />
           <Route path="/cart" element={<Layout><CartPage /></Layout>} />
           <Route path="/checkout" element={<Layout><CheckoutPage /></Layout>} />
           <Route path="/order/:orderId" element={<Layout><TrackOrderPage /></Layout>} />
           
-          {/* Admin Routes */}
+          {/* Admin Routes — auth guard via AdminLayout */}
           <Route path="/admin" element={<AdminLayout><AdminDashboard /></AdminLayout>} />
           <Route path="/admin/stats" element={<AdminLayout><AdminStats /></AdminLayout>} />
           <Route path="/admin/menu" element={<AdminLayout><AdminMenu /></AdminLayout>} />

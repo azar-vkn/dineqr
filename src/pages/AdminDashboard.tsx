@@ -5,6 +5,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { Loader2, CheckCircle2, Clock, ChefHat, Utensils, Database, Filter, BellRing, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
+import { BOOTSTRAP_ADMIN_EMAIL } from "../lib/constants";
 
 interface OrderItem {
   id: string;
@@ -37,7 +38,7 @@ export default function AdminDashboard() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
-        if (currentUser.email === "asirselvin446@gmail.com") {
+        if (currentUser.email === BOOTSTRAP_ADMIN_EMAIL) {
           setRole("admin");
           return;
         }
@@ -253,14 +254,16 @@ export default function AdminDashboard() {
               </select>
             </div>
             
-            <button 
-              onClick={seedMenu}
-              className="flex items-center gap-2 text-sm font-medium text-stone-500 hover:text-stone-800 transition-colors bg-white px-3 py-1.5 rounded-lg border border-stone-200 shadow-sm hidden md:flex"
-              title="Add sample items to the menu"
-            >
-              <Database className="w-4 h-4" />
-              Seed Menu
-            </button>
+            {role === "admin" && (
+              <button 
+                onClick={seedMenu}
+                className="flex items-center gap-2 text-sm font-medium text-stone-500 hover:text-stone-800 transition-colors bg-white px-3 py-1.5 rounded-lg border border-stone-200 shadow-sm hidden md:flex"
+                title="Add sample items to the menu"
+              >
+                <Database className="w-4 h-4" />
+                Seed Menu
+              </button>
+            )}
             <div className="bg-emerald-100 text-emerald-800 px-4 py-2 rounded-full font-bold shadow-sm">
               {activeOrders.length} Active
             </div>

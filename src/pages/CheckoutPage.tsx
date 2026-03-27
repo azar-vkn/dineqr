@@ -2,10 +2,13 @@ import { useState, useEffect } from "react";
 import { useCartStore } from "../store";
 import { useNavigate } from "react-router-dom";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import { db } from "../firebase";
+import { httpsCallable } from "firebase/functions";
+import { db, functions } from "../firebase";
 import { toast } from "sonner";
 import { Loader2, CreditCard, CheckCircle2, Smartphone } from "lucide-react";
 import { sanitizeText, validateOrderItems } from "../lib/sanitize";
+import { checkOrderRateLimit, formatCooldown } from "../lib/rateLimit";
+import { ORDER_LIMITS } from "../lib/constants";
 
 declare global {
   interface Window {
@@ -15,6 +18,13 @@ declare global {
 
 // Razorpay Key ID (public key — safe to expose on client)
 const RAZORPAY_KEY_ID = (import.meta as any).env?.VITE_RAZORPAY_KEY_ID as string | undefined;
+
+// Generate a cryptographically random tracking token for secure order URLs
+function generateTrackingToken(): string {
+  const array = new Uint8Array(24);
+  crypto.getRandomValues(array);
+  return Array.from(array, (b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 export default function CheckoutPage() {
   const { items, getTotal, tableNumber, customerName, clearCart, setLastOrderId } = useCartStore();
@@ -35,78 +45,80 @@ export default function CheckoutPage() {
     setLoading(false);
   }, [items, navigate, orderPlaced]);
 
-  // Write order directly to Firestore (Spark plan — no Cloud Functions)
-  const createOrder = async (
-    paymentMethodType: "cash" | "upi",
-    paymentStatus: "paid" | "pending_collection",
-    razorpayPaymentId?: string
-  ) => {
-    const safeTableNumber = sanitizeText(tableNumber || "Unknown");
-    const safeCustomerName = sanitizeText(customerName || "Guest");
-
-    if (!safeTableNumber || safeTableNumber.length > 20) {
-      toast.error("Invalid table number. Please scan the QR code again.");
-      return null;
-    }
-
-    if (!validateOrderItems(items)) {
-      toast.error("Your cart contains invalid items. Please clear your cart and try again.");
-      return null;
-    }
-
-    const recalculatedTotal = Math.round(
-      items.reduce((sum, item) => sum + item.price * item.quantity, 0) * 1.05
-    );
-
-    const orderData: any = {
-      tableNumber: safeTableNumber,
-      customerName: safeCustomerName,
-      items: items.map((item) => ({
-        id: item.id,
-        name: sanitizeText(item.name),
-        price: Math.abs(item.price),
-        quantity: Math.max(1, Math.min(50, Math.floor(item.quantity))),
-      })),
-      total: recalculatedTotal,
-      status: "pending",
-      paymentStatus,
-      paymentMethod: paymentMethodType,
-      createdAt: serverTimestamp(),
-    };
-
-    // Store Razorpay payment ID for staff reconciliation
-    if (razorpayPaymentId) {
-      orderData.razorpayPaymentId = razorpayPaymentId;
-    }
-
-    const docRef = await addDoc(collection(db, "orders"), orderData);
-    return docRef.id;
-  };
-
-  // ─── Cash Order ───
+  // ─── Cash Order (client-side Firestore write — validated by rules) ───
   const handleCashOrder = async () => {
+    // Rate limit check
+    const rateCheck = checkOrderRateLimit();
+    if (!rateCheck.allowed) {
+      toast.error(`Too many orders. Please wait ${formatCooldown(rateCheck.retryAfterMs!)}`);
+      return;
+    }
+
     setIsProcessing(true);
     try {
-      const orderId = await createOrder("cash", "pending_collection");
-      if (!orderId) return;
+      const safeTableNumber = sanitizeText(tableNumber || "Unknown");
+      const safeCustomerName = sanitizeText(customerName || "Guest");
+
+      if (!safeTableNumber || safeTableNumber.length > ORDER_LIMITS.MAX_TABLE_NUMBER_LENGTH) {
+        toast.error("Invalid table number. Please scan the QR code again.");
+        return;
+      }
+
+      if (!validateOrderItems(items)) {
+        toast.error("Your cart contains invalid items. Please clear your cart and try again.");
+        return;
+      }
+
+      const recalculatedTotal = Math.round(
+        items.reduce((sum, item) => sum + item.price * item.quantity, 0) * 1.05
+      );
+
+      if (recalculatedTotal > ORDER_LIMITS.MAX_TOTAL) {
+        toast.error("Order total exceeds maximum limit.");
+        return;
+      }
+
+      // Generate a random tracking token for secure order tracking
+      const trackingToken = generateTrackingToken();
+
+      const orderData: any = {
+        tableNumber: safeTableNumber,
+        customerName: safeCustomerName,
+        items: items.map((item) => ({
+          id: item.id,
+          name: sanitizeText(item.name),
+          price: Math.abs(item.price),
+          quantity: Math.max(1, Math.min(ORDER_LIMITS.MAX_QUANTITY_PER_ITEM, Math.floor(item.quantity))),
+        })),
+        total: recalculatedTotal,
+        status: "pending",
+        paymentStatus: "pending_collection",
+        paymentMethod: "cash",
+        trackingToken,
+        createdAt: serverTimestamp(),
+      };
+
+      const docRef = await addDoc(collection(db, "orders"), orderData);
 
       setOrderPlaced(true);
       clearCart();
-      setLastOrderId(orderId);
+      setLastOrderId(docRef.id);
       toast.success("Order placed! Please pay at the counter.");
-      navigate(`/order/${orderId}`);
+      navigate(`/order/${docRef.id}?token=${trackingToken}`);
     } catch (error: any) {
-      console.error("Cash order error:", error);
+      if (import.meta.env.DEV) console.error("Cash order error:", error);
       toast.error("Failed to place order. Please try again.");
     } finally {
       setIsProcessing(false);
     }
   };
 
-  // ─── Razorpay Payment ───
+  // ─── Secure Razorpay Payment (via Cloud Functions) ───
   const handleRazorpayPayment = async () => {
-    if (!RAZORPAY_KEY_ID) {
-      toast.error("Payment system not configured. Please contact staff.");
+    // Rate limit check
+    const rateCheck = checkOrderRateLimit();
+    if (!rateCheck.allowed) {
+      toast.error(`Too many orders. Please wait ${formatCooldown(rateCheck.retryAfterMs!)}`);
       return;
     }
 
@@ -117,61 +129,129 @@ export default function CheckoutPage() {
 
     setIsProcessing(true);
 
-    const options = {
-      key: RAZORPAY_KEY_ID,
-      amount: finalAmount * 100, // Razorpay expects paise
-      currency: "INR",
-      name: "DineQR",
-      description: `Table ${tableNumber} Order`,
-      handler: async (response: { razorpay_payment_id: string }) => {
-        // Payment successful — write order to Firestore with payment ID
-        try {
-          const orderId = await createOrder("upi", "paid", response.razorpay_payment_id);
-          if (!orderId) {
-            toast.error("Payment received but order creation failed. Please contact staff.");
-            setIsProcessing(false);
-            return;
-          }
-
-          setOrderPlaced(true);
-          clearCart();
-          setLastOrderId(orderId);
-          toast.success("Payment successful! Order placed.");
-          navigate(`/order/${orderId}`);
-        } catch (error: any) {
-          console.error("Order creation after payment error:", error);
-          toast.error(
-            `Payment received (ID: ${response.razorpay_payment_id}) but order failed. Please show this to staff.`
-          );
-          setIsProcessing(false);
-        }
-      },
-      prefill: {
-        name: customerName || "Guest",
-      },
-      notes: {
+    try {
+      // Step 1: Create Razorpay order via Cloud Function
+      const createOrder = httpsCallable(functions, "createRazorpayOrder");
+      const result = await createOrder({
+        items: items.map((item) => ({
+          id: item.id,
+          name: item.name,
+          price: item.price,
+          quantity: Math.max(1, Math.min(ORDER_LIMITS.MAX_QUANTITY_PER_ITEM, Math.floor(item.quantity))),
+        })),
         tableNumber: tableNumber || "Unknown",
-      },
-      theme: {
-        color: "#065f46",
-      },
-      modal: {
-        ondismiss: () => {
-          setIsProcessing(false);
-          toast.info("Payment cancelled.");
+        customerName: customerName || "Guest",
+      });
+
+      const orderData = result.data as {
+        razorpayOrderId: string;
+        amount: number;
+        currency: string;
+        keyId: string;
+        validatedItems: Array<{ id: string; name: string; price: number; quantity: number }>;
+        totalRupees: number;
+      };
+
+      // Step 2: Open Razorpay checkout with server-generated order
+      const options = {
+        key: orderData.keyId,
+        amount: orderData.amount,
+        currency: orderData.currency,
+        order_id: orderData.razorpayOrderId,
+        name: "DineQR",
+        description: `Table ${tableNumber} Order`,
+        handler: async (response: {
+          razorpay_order_id: string;
+          razorpay_payment_id: string;
+          razorpay_signature: string;
+        }) => {
+          // Step 3: Verify payment signature via Cloud Function
+          try {
+            const verifyPayment = httpsCallable(functions, "verifyRazorpayPayment");
+            const verifyResult = await verifyPayment({
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            });
+
+            const verifyData = verifyResult.data as {
+              verified: boolean;
+              razorpayOrderId: string;
+              razorpayPaymentId: string;
+              verificationToken: string;
+            };
+
+            if (!verifyData.verified) {
+              toast.error("Payment verification failed. Please contact staff.");
+              setIsProcessing(false);
+              return;
+            }
+
+            // Step 4: Write order to Firestore from client
+            // Includes verificationToken (HMAC proof from server) to prevent fake paid orders
+            const safeTableNumber = sanitizeText(tableNumber || "Unknown");
+            const safeCustomerName = sanitizeText(customerName || "Guest");
+            const trackingToken = generateTrackingToken();
+
+            const docRef = await addDoc(collection(db, "orders"), {
+              tableNumber: safeTableNumber,
+              customerName: safeCustomerName,
+              items: orderData.validatedItems,
+              total: orderData.totalRupees,
+              status: "pending",
+              paymentStatus: "paid",
+              paymentMethod: "upi",
+              razorpayOrderId: verifyData.razorpayOrderId,
+              razorpayPaymentId: verifyData.razorpayPaymentId,
+              verificationToken: verifyData.verificationToken,
+              trackingToken,
+              createdAt: serverTimestamp(),
+            });
+
+            setOrderPlaced(true);
+            clearCart();
+            setLastOrderId(docRef.id);
+            toast.success("Payment verified! Order placed.");
+            navigate(`/order/${docRef.id}?token=${trackingToken}`);
+          } catch (verifyError: any) {
+            if (import.meta.env.DEV) console.error("Payment verification error:", verifyError);
+            toast.error(
+              `Payment received but verification failed. Please contact staff with Payment ID: ${response.razorpay_payment_id}`
+            );
+            setIsProcessing(false);
+          }
         },
-      },
-    };
+        prefill: {
+          name: customerName || "Guest",
+        },
+        notes: {
+          tableNumber: tableNumber || "Unknown",
+        },
+        theme: {
+          color: "#065f46",
+        },
+        modal: {
+          ondismiss: () => {
+            setIsProcessing(false);
+            toast.info("Payment cancelled.");
+          },
+        },
+      };
 
-    const razorpay = new window.Razorpay(options);
+      const razorpay = new window.Razorpay(options);
 
-    razorpay.on("payment.failed", (response: any) => {
-      console.error("Payment failed:", response.error);
-      toast.error(response.error?.description || "Payment failed. Please try again.");
+      razorpay.on("payment.failed", (response: any) => {
+        if (import.meta.env.DEV) console.error("Payment failed:", response.error);
+        toast.error(response.error?.description || "Payment failed. Please try again.");
+        setIsProcessing(false);
+      });
+
+      razorpay.open();
+    } catch (error: any) {
+      if (import.meta.env.DEV) console.error("Order creation error:", error);
+      toast.error("Failed to initialize payment. Please try again.");
       setIsProcessing(false);
-    });
-
-    razorpay.open();
+    }
   };
 
   if (orderPlaced) {

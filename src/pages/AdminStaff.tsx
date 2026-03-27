@@ -4,6 +4,7 @@ import { db } from "../firebase";
 import { toast } from "sonner";
 import { Trash2, UserPlus, Shield, User } from "lucide-react";
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
+import { BOOTSTRAP_ADMIN_EMAIL } from "../lib/constants";
 
 interface StaffUser {
   id: string;
@@ -33,7 +34,7 @@ export default function AdminStaff() {
       const needsMigration: StaffUser[] = [];
 
       usersData.forEach(user => {
-        if (user.email === "asirselvin446@gmail.com") {
+        if (user.email === BOOTSTRAP_ADMIN_EMAIL) {
           // Primary admin is hardcoded, delete from DB if it exists to avoid confusion
           duplicatesToDelete.push(user.id);
           return;
@@ -121,7 +122,7 @@ export default function AdminStaff() {
   };
 
   const handleDeleteUser = async (id: string, email: string) => {
-    if (email === "asirselvin446@gmail.com") {
+    if (email === BOOTSTRAP_ADMIN_EMAIL) {
       toast.error("Cannot remove the primary administrator");
       return;
     }
@@ -213,7 +214,7 @@ export default function AdminStaff() {
                           <Shield className="w-5 h-5" />
                         </div>
                         <div>
-                          <p className="font-medium text-stone-900">asirselvin446@gmail.com</p>
+                          <p className="font-medium text-stone-900">{BOOTSTRAP_ADMIN_EMAIL}</p>
                           <p className="text-xs text-stone-500">Primary Administrator</p>
                         </div>
                       </div>

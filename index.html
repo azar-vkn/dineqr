@@ -3,40 +3,45 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Dine Qr</title>
+
+    <!-- Security Meta Tags -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+
+    <!-- SEO -->
+    <title>DineQR — Smart Restaurant Ordering</title>
+    <meta name="description" content="DineQR: QR-based restaurant ordering system. Scan, order, and pay seamlessly from your table." />
+
     <script>
       // Pre-emptively define fetch to prevent dependencies from trying to polyfill/override it
-      // This must run as early as possible in the <head>
       (function() {
         if (typeof window.fetch === 'function') {
           const originalFetch = window.fetch;
           try {
-            // Check if it's already read-only
             const descriptor = Object.getOwnPropertyDescriptor(window, 'fetch');
             if (descriptor && !descriptor.writable && !descriptor.configurable) {
-              console.log('window.fetch is already read-only and non-configurable');
               return;
             }
-
             Object.defineProperty(window, 'fetch', {
               value: originalFetch,
               configurable: false,
               writable: false
             });
           } catch (e) {
-            // If we can't lock it, at least we tried. 
-            // The error might be coming from a library trying to assign to it.
-            console.warn('Could not lock window.fetch:', e);
+            // Swallow — if we can't lock it, the app still works
           }
         }
       })();
     </script>
-    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 
+    <!-- Razorpay Checkout (external dependency) -->
+    <script
+      src="https://checkout.razorpay.com/v1/checkout.js"
+      crossorigin="anonymous"
+    ></script>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import { Loader2, CheckCircle2, Clock, ChefHat, Utensils, ArrowLeft, Star } from "lucide-react";
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
+import { sanitizeText } from "../lib/sanitize";
 
 interface OrderItem {
   id: string;
@@ -33,8 +34,11 @@ const STATUS_STEPS = [
 export default function TrackOrderPage() {
   const { orderId } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const trackingToken = searchParams.get("token");
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
+  const [accessDenied, setAccessDenied] = useState(false);
 
   // Feedback state
   const [feedback, setFeedback] = useState<{ rating: number, comment?: string } | null>(null);
@@ -50,7 +54,14 @@ export default function TrackOrderPage() {
       doc(db, "orders", orderId),
       (docSnap) => {
         if (docSnap.exists()) {
-          setOrder({ id: docSnap.id, ...docSnap.data() } as Order);
+          const data = docSnap.data();
+          // Verify tracking token if order has one
+          if (data.trackingToken && data.trackingToken !== trackingToken) {
+            setAccessDenied(true);
+            setLoading(false);
+            return;
+          }
+          setOrder({ id: docSnap.id, ...data } as Order);
         } else {
           setOrder(null);
         }
@@ -70,7 +81,7 @@ export default function TrackOrderPage() {
         }
       },
       (error) => {
-        console.error("Error fetching feedback:", error);
+        if (import.meta.env.DEV) console.error("Error fetching feedback:", error);
       }
     );
 
@@ -87,12 +98,12 @@ export default function TrackOrderPage() {
       if (!orderId) return;
       await setDoc(doc(db, "feedback", orderId), {
         rating,
-        comment: comment.trim(),
+        comment: sanitizeText(comment.trim()),
         createdAt: serverTimestamp()
       });
       // The onSnapshot listener will automatically update the UI
     } catch (error) {
-      console.error("Error submitting feedback:", error);
+      if (import.meta.env.DEV) console.error("Error submitting feedback:", error);
       alert("Failed to submit feedback. Please try again.");
     } finally {
       setSubmitting(false);
@@ -104,6 +115,24 @@ export default function TrackOrderPage() {
       <div className="flex flex-col items-center justify-center h-[60vh]">
         <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mb-4" />
         <p className="text-stone-500 font-medium">Loading order details...</p>
+      </div>
+    );
+  }
+
+  if (accessDenied) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-4">
+        <div className="w-20 h-20 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-2">
+          <span className="text-3xl">🔒</span>
+        </div>
+        <h2 className="text-2xl font-bold text-stone-800">Access Denied</h2>
+        <p className="text-stone-500 max-w-xs">You don't have permission to view this order.</p>
+        <button 
+          onClick={() => navigate("/")}
+          className="mt-4 px-6 py-2 bg-stone-800 text-white font-medium rounded-full hover:bg-stone-900 transition-colors"
+        >
+          Go Home
+        </button>
       </div>
     );
   }

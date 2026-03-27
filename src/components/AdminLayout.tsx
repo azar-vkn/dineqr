@@ -2,6 +2,7 @@ import { ReactNode, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { LayoutDashboard, MenuSquare, QrCode, UtensilsCrossed, LogOut, Loader2, Users, TrendingUp, ClipboardList } from "lucide-react";
 import { cn } from "../lib/utils";
+import { BOOTSTRAP_ADMIN_EMAIL } from "../lib/constants";
 import { auth, db } from "../firebase";
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from "firebase/auth";
 import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
@@ -21,7 +22,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       
       if (currentUser) {
         // Check if bootstrap admin
-        if (currentUser.email === "asirselvin446@gmail.com") {
+        if (currentUser.email === BOOTSTRAP_ADMIN_EMAIL) {
           setRole("admin");
           setLoading(false);
           return;
