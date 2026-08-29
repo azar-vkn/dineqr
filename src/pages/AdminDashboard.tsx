@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { updateDoc, doc, getDoc, collection } from "firebase/firestore";
 import { db } from "../firebase";
+import { tenantDoc } from "../lib/tenant";
+import { useTenant } from "../hooks/useTenant";
 import { Filter, Utensils, Plus, UserCheck, Clock, ChefHat, CheckCircle2, Package } from "lucide-react";
 import { toast } from "sonner";
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
@@ -14,6 +16,7 @@ import type { OrderStatus, Order } from "../types";
 
 export default function AdminDashboard() {
   const { orders, loading } = useOrders({ maxOrders: 100 });
+  const { restaurantId } = useTenant();
   const { role } = useUserRole();
   const [selectedTable, setSelectedTable] = useState<string>("All");
   const [sourceFilter, setSourceFilter] = useState<string>("All");
@@ -94,7 +97,7 @@ export default function AdminDashboard() {
 
   const updateOrderStatus = async (orderId: string, newStatus: OrderStatus) => {
     try {
-      await updateDoc(doc(db, "orders", orderId), { status: newStatus });
+      await updateDoc(restaurantId ? tenantDoc(db, restaurantId, "orders", orderId) : doc(db, "orders", orderId), { status: newStatus });
       if (newStatus === "cancelled") toast.success("Order cancelled");
     } catch (error: any) {
       console.error("Error updating order status:", error);
@@ -105,7 +108,7 @@ export default function AdminDashboard() {
 
   const markAsPaid = async (orderId: string) => {
     try {
-      await updateDoc(doc(db, "orders", orderId), { paymentStatus: "paid" });
+      await updateDoc(restaurantId ? tenantDoc(db, restaurantId, "orders", orderId) : doc(db, "orders", orderId), { paymentStatus: "paid" });
       toast.success("Payment marked as collected. Order is now visible to staff.");
       setConfirmingOrderId(null);
     } catch (error: any) {

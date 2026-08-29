@@ -1,6 +1,8 @@
 import { useState, useMemo } from "react";
 import { updateDoc, doc } from "firebase/firestore";
 import { db } from "../firebase";
+import { tenantDoc } from "../lib/tenant";
+import { useTenant } from "../hooks/useTenant";
 import { toast } from "sonner";
 import { useOrders } from "../hooks/useOrders";
 import {
@@ -63,6 +65,7 @@ function deriveTableStatus(order: Order): TableStatus {
 
 export default function AdminPos() {
   const { orders, loading } = useOrders({ maxOrders: 200 });
+  const { restaurantId } = useTenant();
   const [layout, setLayout] = useState<"grid" | "list">("grid");
   const [selectedTable, setSelectedTable] = useState<TableData | null>(null);
 
@@ -119,7 +122,7 @@ export default function AdminPos() {
   const handleSendKOT = async (table: TableData) => {
     if (!table.orderId) return;
     try {
-      await updateDoc(doc(db, "orders", table.orderId), {
+      await updateDoc(restaurantId ? tenantDoc(db, restaurantId, "orders", table.orderId) : doc(db, "orders", table.orderId), {
         status: "preparing" as OrderStatus,
       });
       toast.success(`🔥 KOT sent for ${table.no}!`);
@@ -139,7 +142,7 @@ export default function AdminPos() {
       return;
     }
     try {
-      await updateDoc(doc(db, "orders", table.orderId), {
+      await updateDoc(restaurantId ? tenantDoc(db, restaurantId, "orders", table.orderId) : doc(db, "orders", table.orderId), {
         status: "served" as OrderStatus,
       });
       toast.success(`🧾 Bill sent for ${table.no}!`);
@@ -153,7 +156,7 @@ export default function AdminPos() {
   const handlePaymentReceived = async (table: TableData) => {
     if (!table.orderId) return;
     try {
-      await updateDoc(doc(db, "orders", table.orderId), {
+      await updateDoc(restaurantId ? tenantDoc(db, restaurantId, "orders", table.orderId) : doc(db, "orders", table.orderId), {
         status: "served" as OrderStatus,
         paymentStatus: "paid",
         paymentMethod: "cash",

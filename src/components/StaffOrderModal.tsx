@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { collection, addDoc, onSnapshot, serverTimestamp, query, where, getDocs, doc, orderBy, runTransaction } from "firebase/firestore";
 import { db } from "../firebase";
+import { tenantCollection, tenantDoc } from "../lib/tenant";
+import { useTenant } from "../hooks/useTenant";
 import { toast } from "sonner";
 import { X, Plus, Minus, ShoppingBag, Loader2, UtensilsCrossed, Package, ChefHat } from "lucide-react";
 import type { MenuItem } from "../types";
@@ -27,6 +29,7 @@ interface CartEntry {
 }
 
 export default function StaffOrderModal({ isOpen, onClose, staffId, staffName }: StaffOrderModalProps) {
+  const { restaurantId } = useTenant();
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loadingMenu, setLoadingMenu] = useState(true);
   const [tableNumber, setTableNumber] = useState("");
@@ -39,7 +42,7 @@ export default function StaffOrderModal({ isOpen, onClose, staffId, staffName }:
   // Fetch available menu items
   useEffect(() => {
     if (!isOpen) return;
-    const q = query(collection(db, "menu"), where("available", "==", true));
+    const q = query(restaurantId ? tenantCollection(db, restaurantId, "menu") : collection(db, "menu"), where("available", "==", true));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const items: MenuItem[] = [];
       snapshot.forEach((doc) => {
@@ -49,7 +52,7 @@ export default function StaffOrderModal({ isOpen, onClose, staffId, staffName }:
       setLoadingMenu(false);
     });
     return () => unsubscribe();
-  }, [isOpen]);
+  }, [isOpen, restaurantId]);
 
   const categories = ["All", ...Array.from(new Set(menuItems.map((i) => i.category)))];
   const filteredItems = activeCategory === "All" ? menuItems : menuItems.filter((i) => i.category === activeCategory);
@@ -102,7 +105,7 @@ export default function StaffOrderModal({ isOpen, onClose, staffId, staffName }:
       // or the existing one vanished between lookup and merge).
       const createNewOrder = async () => {
         const trackingToken = generateTrackingToken();
-        await addDoc(collection(db, "orders"), {
+        await addDoc(restaurantId ? tenantCollection(db, restaurantId, "orders") : collection(db, "orders"), {
           tableNumber: tableNumber.trim(),
           customerName: customerName.trim() || "Walk-in",
           items: newItems,
@@ -122,7 +125,7 @@ export default function StaffOrderModal({ isOpen, onClose, staffId, staffName }:
 
       // Find an existing active staff order for this table.
       const ordersQuery = query(
-        collection(db, "orders"),
+        restaurantId ? tenantCollection(db, restaurantId, "orders") : collection(db, "orders"),
         where("tableNumber", "==", tableNumber.trim()),
         where("orderSource", "==", "staff"),
         where("status", "in", activeStatuses)
@@ -136,7 +139,7 @@ export default function StaffOrderModal({ isOpen, onClose, staffId, staffName }:
         // Two staff submitting for the same table used to read-then-write and
         // clobber each other (lost update). Re-read inside a transaction so
         // concurrent merges retry against fresh data instead of overwriting.
-        const existingRef = doc(db, "orders", existingSnap.docs[0].id);
+        const existingRef = restaurantId ? tenantDoc(db, restaurantId, "orders", existingSnap.docs[0].id) : doc(db, "orders", existingSnap.docs[0].id);
         let merged = false;
         await runTransaction(db, async (tx) => {
           const snap = await tx.get(existingRef);
