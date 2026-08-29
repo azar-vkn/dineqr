@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { collection, onSnapshot, query, orderBy, doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
+import { tenantCollection } from "../lib/tenant";
 import { useCartStore } from "../store";
 import MenuItemCard from "../components/MenuItemCard";
 import { Search, ArrowRight } from "lucide-react";
@@ -10,7 +11,7 @@ import { MenuSkeleton } from "../components/Skeletons";
 import type { MenuItem } from "../types";
 
 export default function MenuPage() {
-  const { tableId } = useParams<{ tableId: string }>();
+  const { tableId, restaurantId } = useParams<{ tableId: string; restaurantId: string }>();
   const navigate = useNavigate();
   const setTableNumber = useCartStore((state) => state.setTableNumber);
   const { items, getTotal } = useCartStore();
@@ -28,7 +29,10 @@ export default function MenuPage() {
   }, [tableId, setTableNumber]);
 
   useEffect(() => {
-    const q = query(collection(db, "menu"), orderBy("name"));
+    // Tenant-scoped when the QR carries a restaurantId; legacy top-level
+    // collection otherwise (single-tenant transition).
+    const menuRef = restaurantId ? tenantCollection(db, restaurantId, "menu") : collection(db, "menu");
+    const q = query(menuRef, orderBy("name"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const items: MenuItem[] = [];
       snapshot.forEach((doc) => {
@@ -42,11 +46,12 @@ export default function MenuPage() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [restaurantId]);
 
   // Fetch menu item ratings
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "menuRatings"), (snapshot) => {
+    const ratingsRef = restaurantId ? tenantCollection(db, restaurantId, "menuRatings") : collection(db, "menuRatings");
+    const unsub = onSnapshot(ratingsRef, (snapshot) => {
       const ratingsMap: Record<string, { avg: number; count: number }> = {};
       snapshot.forEach((doc) => {
         const data = doc.data();
@@ -60,7 +65,7 @@ export default function MenuPage() {
       setRatings(ratingsMap);
     });
     return () => unsub();
-  }, []);
+  }, [restaurantId]);
 
   if (loading) {
     return (

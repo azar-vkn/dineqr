@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { Printer, Link2 } from "lucide-react";
 import { cn } from "../lib/utils";
+import { useTenant } from "../hooks/useTenant";
 
 export default function AdminQR() {
   const [tableCount, setTableCount] = useState(10);
@@ -12,9 +13,14 @@ export default function AdminQR() {
   // which is useless when scanned — so prefer the deployed site URL from
   // VITE_PUBLIC_APP_URL and only fall back to the current origin on web.
   // The "/#/" is required because the app uses HashRouter.
+  const { restaurantId } = useTenant();
   const appUrl = (import.meta.env.VITE_PUBLIC_APP_URL || window.location.origin).replace(/\/$/, "");
   const isPublicUrl = /^https?:\/\//.test(appUrl);
-  const baseUrl = `${appUrl}/#/table/`;
+  // Tenant-scoped QR (/#/r/{restaurantId}/table/{n}) when the admin belongs to a
+  // restaurant; legacy path otherwise (single-tenant transition).
+  const baseUrl = restaurantId
+    ? `${appUrl}/#/r/${restaurantId}/table/`
+    : `${appUrl}/#/table/`;
 
   useEffect(() => {
     const handleAfterPrint = () => setPrintTarget(null);

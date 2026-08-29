@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase";
+import { tenantDoc } from "../lib/tenant";
 import {
   Loader2,
   ArrowLeft,
@@ -15,7 +16,7 @@ import { toast } from "sonner";
 import type { Bill } from "../types";
 
 export default function ReceiptPage() {
-  const { orderId } = useParams<{ orderId: string }>();
+  const { orderId, restaurantId } = useParams<{ orderId: string; restaurantId: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const trackingToken = searchParams.get("token");
@@ -29,7 +30,7 @@ export default function ReceiptPage() {
 
     // Bills are keyed by orderId
     const unsubscribe = onSnapshot(
-      doc(db, "bills", orderId),
+      restaurantId ? tenantDoc(db, restaurantId, "bills", orderId) : doc(db, "bills", orderId),
       (docSnap) => {
         if (docSnap.exists()) {
           const data = docSnap.data();

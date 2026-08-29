@@ -73,6 +73,35 @@ export default function App() {
               </RouteErrorBoundary>
             } />
             
+            {/* Tenant-scoped customer routes (multi-tenant) — QR encodes the
+                restaurant: /#/r/{restaurantId}/table/{tableId}. Legacy routes
+                above stay for the single-tenant transition. */}
+            <Route path="/r/:restaurantId/table/:tableId" element={
+              <RouteErrorBoundary routeName="Menu">
+                <Layout><MenuPage /></Layout>
+              </RouteErrorBoundary>
+            } />
+            <Route path="/r/:restaurantId/cart" element={
+              <RouteErrorBoundary routeName="Cart">
+                <Layout><CartPage /></Layout>
+              </RouteErrorBoundary>
+            } />
+            <Route path="/r/:restaurantId/checkout" element={
+              <RouteErrorBoundary routeName="Checkout">
+                <Layout><CheckoutPage /></Layout>
+              </RouteErrorBoundary>
+            } />
+            <Route path="/r/:restaurantId/order/:orderId" element={
+              <RouteErrorBoundary routeName="Order Tracking">
+                <Layout><TrackOrderPage /></Layout>
+              </RouteErrorBoundary>
+            } />
+            <Route path="/r/:restaurantId/receipt/:orderId" element={
+              <RouteErrorBoundary routeName="Receipt">
+                <Layout><ReceiptPage /></Layout>
+              </RouteErrorBoundary>
+            } />
+
             {/* Admin Routes — auth guard via AdminLayout */}
             <Route path="/admin" element={
               <RouteErrorBoundary routeName="Live Orders">

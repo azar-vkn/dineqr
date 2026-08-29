@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { doc, onSnapshot, setDoc, serverTimestamp, increment } from "firebase/firestore";
 import { db } from "../firebase";
+import { tenantDoc } from "../lib/tenant";
 import { Loader2, CheckCircle2, Clock, ArrowLeft, Star } from "lucide-react";
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
 import { sanitizeText } from "../lib/sanitize";
@@ -10,7 +11,7 @@ import { useCartStore } from "../store";
 import type { Order } from "../types";
 
 export default function TrackOrderPage() {
-  const { orderId } = useParams<{ orderId: string }>();
+  const { orderId, restaurantId } = useParams<{ orderId: string; restaurantId: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const trackingToken = searchParams.get("token");
@@ -29,7 +30,7 @@ export default function TrackOrderPage() {
     if (!orderId) return;
 
     const unsubscribeOrder = onSnapshot(
-      doc(db, "orders", orderId),
+      restaurantId ? tenantDoc(db, restaurantId, "orders", orderId) : doc(db, "orders", orderId),
       (docSnap) => {
         if (docSnap.exists()) {
           const data = docSnap.data();
@@ -51,7 +52,7 @@ export default function TrackOrderPage() {
     );
 
     const unsubscribeFeedback = onSnapshot(
-      doc(db, "feedback", orderId),
+      restaurantId ? tenantDoc(db, restaurantId, "feedback", orderId) : doc(db, "feedback", orderId),
       (docSnap) => {
         if (docSnap.exists()) {
           setFeedback(docSnap.data() as { rating: number, comment?: string });
@@ -75,7 +76,7 @@ export default function TrackOrderPage() {
       if (!orderId || !order) return;
       
       // Save feedback document
-      await setDoc(doc(db, "feedback", orderId), {
+      await setDoc(restaurantId ? tenantDoc(db, restaurantId, "feedback", orderId) : doc(db, "feedback", orderId), {
         rating,
         comment: sanitizeText(comment.trim()),
         createdAt: serverTimestamp()
@@ -92,7 +93,7 @@ export default function TrackOrderPage() {
       // Update per-item ratings for menu stars in the background
       const itemIds = new Set(order.items.map(item => item.id));
       const ratingPromises = Array.from(itemIds).map(itemId =>
-        setDoc(doc(db, "menuRatings", itemId), {
+        setDoc(restaurantId ? tenantDoc(db, restaurantId, "menuRatings", itemId) : doc(db, "menuRatings", itemId), {
           totalRating: increment(rating),
           ratingCount: increment(1),
         }, { merge: true }).catch(err => console.error("Rating update failed:", err))

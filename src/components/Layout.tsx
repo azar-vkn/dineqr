@@ -1,13 +1,15 @@
 import { ReactNode, useState, useEffect } from "react";
 import { ShoppingBag, UtensilsCrossed, AlertCircle, ClipboardList, X, Clock, Package } from "lucide-react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase";
+import { tenantDoc } from "../lib/tenant";
 import { useCartStore } from "../store";
 
 export default function Layout({ children }: { children: ReactNode }) {
   const { items, tableNumber, customerName, setCustomerName, orderType, setOrderType, lastOrderId, lastTrackingToken, setLastOrderId, isCartStale, clearCart, hasActiveOrder } = useCartStore();
   const location = useLocation();
+  const { restaurantId } = useParams<{ restaurantId: string }>();
   const [nameInput, setNameInput] = useState("");
   const [dismissedStaleWarning, setDismissedStaleWarning] = useState(false);
   const [orderStatus, setOrderStatus] = useState<string | null>(null);
@@ -17,13 +19,13 @@ export default function Layout({ children }: { children: ReactNode }) {
       setOrderStatus(null);
       return;
     }
-    const unsubscribe = onSnapshot(doc(db, "orders", lastOrderId), (snap) => {
+    const unsubscribe = onSnapshot(restaurantId ? tenantDoc(db, restaurantId, "orders", lastOrderId) : doc(db, "orders", lastOrderId), (snap) => {
       if (snap.exists()) {
         setOrderStatus(snap.data().status);
       }
     });
     return () => unsubscribe();
-  }, [lastOrderId]);
+  }, [lastOrderId, restaurantId]);
   
   const itemCount = items.reduce((acc, item) => acc + item.quantity, 0);
   const showStaleWarning = items.length > 0 && isCartStale() && !dismissedStaleWarning;

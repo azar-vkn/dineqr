@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import { useCartStore } from "../store";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../firebase";
+import { tenantCollection } from "../lib/tenant";
 import { toast } from "sonner";
 import { Loader2, CreditCard, CheckCircle2, Smartphone } from "lucide-react";
 import { sanitizeText, validateOrderItems } from "../lib/sanitize";
@@ -29,6 +30,7 @@ function generateTrackingToken(): string {
 export default function CheckoutPage() {
   const { items, getTotal, tableNumber, customerName, clearCart, setLastOrderId, orderType } = useCartStore();
   const navigate = useNavigate();
+  const { restaurantId } = useParams<{ restaurantId: string }>();
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [loading, setLoading] = useState(true);
   const [paymentMethod, setPaymentMethod] = useState<"upi" | "cash">("upi");
@@ -100,7 +102,10 @@ export default function CheckoutPage() {
         createdAt: serverTimestamp(),
       };
 
-      const docRef = await addDoc(collection(db, "orders"), orderData);
+      const docRef = await addDoc(
+        restaurantId ? tenantCollection(db, restaurantId, "orders") : collection(db, "orders"),
+        orderData
+      );
 
       setOrderPlaced(true);
       clearCart();
@@ -142,6 +147,7 @@ export default function CheckoutPage() {
         tableNumber: tableNumber || "Unknown",
         customerName: customerName || "Guest",
         orderType: orderType || "dine",
+        restaurantId: restaurantId || null,
       });
 
       const orderData = result.data as {
