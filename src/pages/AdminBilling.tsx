@@ -8,6 +8,8 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { tenantCollection } from "../lib/tenant";
+import { useTenant } from "../hooks/useTenant";
 import {
   Loader2,
   Download,
@@ -27,6 +29,7 @@ import type { Bill } from "../types";
 export default function AdminBilling() {
   const [bills, setBills] = useState<Bill[]>([]);
   const [loading, setLoading] = useState(true);
+  const { restaurantId, loading: tenantLoading } = useTenant();
   const [searchQuery, setSearchQuery] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -41,17 +44,19 @@ export default function AdminBilling() {
     // Date-range query server-side when a range is chosen so older bills are
     // reachable; otherwise stream the most-recent 300 (unbounded reads were the
     // old bug). Range + orderBy on the same field needs no composite index.
+    if (tenantLoading) return;
+    const billsRef = restaurantId ? tenantCollection(db, restaurantId, "bills") : collection(db, "bills");
     const start = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null;
     const end = dateTo ? new Date(new Date(`${dateTo}T00:00:00`).getTime() + 86400000) : null;
     let q;
     if (start && end) {
-      q = query(collection(db, "bills"), where("createdAt", ">=", start), where("createdAt", "<", end), orderBy("createdAt", "desc"));
+      q = query(billsRef, where("createdAt", ">=", start), where("createdAt", "<", end), orderBy("createdAt", "desc"));
     } else if (start) {
-      q = query(collection(db, "bills"), where("createdAt", ">=", start), orderBy("createdAt", "desc"), limit(300));
+      q = query(billsRef, where("createdAt", ">=", start), orderBy("createdAt", "desc"), limit(300));
     } else if (end) {
-      q = query(collection(db, "bills"), where("createdAt", "<", end), orderBy("createdAt", "desc"), limit(300));
+      q = query(billsRef, where("createdAt", "<", end), orderBy("createdAt", "desc"), limit(300));
     } else {
-      q = query(collection(db, "bills"), orderBy("createdAt", "desc"), limit(300));
+      q = query(billsRef, orderBy("createdAt", "desc"), limit(300));
     }
     const unsubscribe = onSnapshot(
       q,
@@ -69,7 +74,7 @@ export default function AdminBilling() {
       }
     );
     return () => unsubscribe();
-  }, [dateFrom, dateTo]);
+  }, [dateFrom, dateTo, restaurantId, tenantLoading]);
 
   if (loading) {
     return (

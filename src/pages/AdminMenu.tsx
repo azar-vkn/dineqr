@@ -1,6 +1,8 @@
 import { useState, useEffect, FormEvent } from "react";
 import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
+import { tenantCollection, tenantDoc } from "../lib/tenant";
+import { useTenant } from "../hooks/useTenant";
 import { Loader2, Plus, Trash2, Image as ImageIcon, Check, X, Flame } from "lucide-react";
 import { toast } from "sonner";
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
@@ -20,6 +22,7 @@ interface MenuItem {
 export default function AdminMenu() {
   const [items, setItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const { restaurantId, loading: tenantLoading } = useTenant();
   const [isAdding, setIsAdding] = useState(false);
   
   // Form state
@@ -36,7 +39,9 @@ export default function AdminMenu() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
-    const q = query(collection(db, "menu"), orderBy("category"), orderBy("name"));
+    if (tenantLoading) return;
+    const menuRef = restaurantId ? tenantCollection(db, restaurantId, "menu") : collection(db, "menu");
+    const q = query(menuRef, orderBy("category"), orderBy("name"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const fetchedItems: MenuItem[] = [];
       snapshot.forEach((doc) => {
@@ -50,7 +55,7 @@ export default function AdminMenu() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [restaurantId, tenantLoading]);
 
   const handleAddItem = async (e: FormEvent) => {
     e.preventDefault();
@@ -61,7 +66,7 @@ export default function AdminMenu() {
 
     setSubmitting(true);
     try {
-      await addDoc(collection(db, "menu"), {
+      await addDoc(restaurantId ? tenantCollection(db, restaurantId, "menu") : collection(db, "menu"), {
         name,
         description,
         price: Number(price),
@@ -98,7 +103,7 @@ export default function AdminMenu() {
     if (!itemToDelete) return;
     setIsDeleting(true);
     try {
-      await deleteDoc(doc(db, "menu", itemToDelete));
+      await deleteDoc(restaurantId ? tenantDoc(db, restaurantId, "menu", itemToDelete) : doc(db, "menu", itemToDelete));
       toast.success("Item deleted.");
       setItemToDelete(null);
     } catch (error) {
@@ -110,7 +115,7 @@ export default function AdminMenu() {
 
   const toggleAvailability = async (id: string, currentStatus: boolean) => {
     try {
-      await updateDoc(doc(db, "menu", id), {
+      await updateDoc(restaurantId ? tenantDoc(db, restaurantId, "menu", id) : doc(db, "menu", id), {
         available: !currentStatus
       });
       toast.success(`Item marked as ${!currentStatus ? 'available' : 'unavailable'}.`);

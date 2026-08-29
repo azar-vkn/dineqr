@@ -3,6 +3,8 @@ import {
   collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc, updateDoc, serverTimestamp
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { tenantCollection, tenantDoc } from "../lib/tenant";
+import { useTenant } from "../hooks/useTenant";
 import { toast } from "sonner";
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
 import {
@@ -18,6 +20,7 @@ import type { Purchase, InvoiceStatus } from "../types";
 export default function AdminPurchases() {
   const [invoices, setInvoices] = useState<Purchase[]>([]);
   const [loading, setLoading] = useState(true);
+  const { restaurantId, loading: tenantLoading } = useTenant();
   const [activeTab, setActiveTab] = useState("Invoice Wise");
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -36,7 +39,9 @@ export default function AdminPurchases() {
 
   // ─── Real-time Firestore listener ───────────────────────────
   useEffect(() => {
-    const q = query(collection(db, "purchases"), orderBy("createdAt", "desc"));
+    if (tenantLoading) return;
+    const purchasesRef = restaurantId ? tenantCollection(db, restaurantId, "purchases") : collection(db, "purchases");
+    const q = query(purchasesRef, orderBy("createdAt", "desc"));
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
@@ -53,7 +58,7 @@ export default function AdminPurchases() {
       }
     );
     return () => unsubscribe();
-  }, []);
+  }, [restaurantId, tenantLoading]);
 
   // ─── Add New Bill ───────────────────────────────────────────
   const handleSaveBill = async () => {
@@ -63,7 +68,7 @@ export default function AdminPurchases() {
     }
     setSaving(true);
     try {
-      await addDoc(collection(db, "purchases"), {
+      await addDoc(restaurantId ? tenantCollection(db, restaurantId, "purchases") : collection(db, "purchases"), {
         supplier: formSupplier.trim(),
         date: formDate,
         amount: Number(formAmount) || 0,
@@ -87,7 +92,7 @@ export default function AdminPurchases() {
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this invoice?")) return;
     try {
-      await deleteDoc(doc(db, "purchases", id));
+      await deleteDoc(restaurantId ? tenantDoc(db, restaurantId, "purchases", id) : doc(db, "purchases", id));
       toast.success("Invoice deleted.");
     } catch (error) {
       toast.error("Failed to delete invoice.");
@@ -98,7 +103,7 @@ export default function AdminPurchases() {
   // ─── Mark as Reviewed ───────────────────────────────────────
   const handleMarkReviewed = async (id: string) => {
     try {
-      await updateDoc(doc(db, "purchases", id), { status: "reviewed" });
+      await updateDoc(restaurantId ? tenantDoc(db, restaurantId, "purchases", id) : doc(db, "purchases", id), { status: "reviewed" });
       toast.success("Invoice marked as reviewed.");
     } catch (error) {
       toast.error("Failed to update invoice.");

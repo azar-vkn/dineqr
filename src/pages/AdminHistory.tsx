@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { collection, onSnapshot, query, orderBy, getDoc, doc, limit, where } from "firebase/firestore";
 import { db } from "../firebase";
+import { tenantCollection, tenantDoc } from "../lib/tenant";
+import { useTenant } from "../hooks/useTenant";
 import { Loader2, Clock, Search, Filter, ChevronDown, ChevronUp, Calendar, UserCheck, ClipboardList, IndianRupee, CheckCircle2, XCircle } from "lucide-react";
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
 import { cn } from "../lib/utils";
@@ -10,6 +12,7 @@ import type { Order } from "../types";
 export default function AdminHistory() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const { restaurantId, loading: tenantLoading } = useTenant();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [paymentFilter, setPaymentFilter] = useState<string>("all");
@@ -23,7 +26,7 @@ export default function AdminHistory() {
   // Fetch feedback when an order is expanded
   useEffect(() => {
     if (expandedOrder && feedbacks[expandedOrder] === undefined) {
-      getDoc(doc(db, "feedback", expandedOrder)).then(snap => {
+      getDoc(restaurantId ? tenantDoc(db, restaurantId, "feedback", expandedOrder) : doc(db, "feedback", expandedOrder)).then(snap => {
         if (snap.exists()) {
           setFeedbacks(prev => ({ ...prev, [expandedOrder]: snap.data() as any }));
         } else {
@@ -37,16 +40,18 @@ export default function AdminHistory() {
     // When a date is chosen, query THAT day server-side so older orders are
     // reachable; otherwise stream the most-recent 300 (unbounded reads were the
     // old bug). Range + orderBy on the same field needs no composite index.
+    if (tenantLoading) return;
+    const ordersRef = restaurantId ? tenantCollection(db, restaurantId, "orders") : collection(db, "orders");
     const start = dateFilter ? new Date(`${dateFilter}T00:00:00`) : null;
     const end = start ? new Date(start.getTime() + 86400000) : null;
     const q = start && end
       ? query(
-          collection(db, "orders"),
+          ordersRef,
           where("createdAt", ">=", start),
           where("createdAt", "<", end),
           orderBy("createdAt", "desc")
         )
-      : query(collection(db, "orders"), orderBy("createdAt", "desc"), limit(300));
+      : query(ordersRef, orderBy("createdAt", "desc"), limit(300));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const fetchedOrders: Order[] = [];
       snapshot.forEach((doc) => {
@@ -60,7 +65,7 @@ export default function AdminHistory() {
     });
 
     return () => unsubscribe();
-  }, [dateFilter]);
+  }, [dateFilter, restaurantId, tenantLoading]);
 
   if (loading) {
     return (

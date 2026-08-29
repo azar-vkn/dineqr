@@ -9,6 +9,8 @@ import {
   QueryConstraint,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { tenantCollection } from "../lib/tenant";
+import { useTenant } from "./useTenant";
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
 import type { Order, OrderStatus } from "../types";
 
@@ -41,12 +43,16 @@ export function useOrders(options: UseOrdersOptions = {}): UseOrdersReturn {
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const { restaurantId, loading: tenantLoading } = useTenant();
 
   // Stable reference for statusFilter to avoid re-subscribing on every render
   const statusFilterRef = useRef(statusFilter);
   statusFilterRef.current = statusFilter;
 
   useEffect(() => {
+    // Wait for tenant claims to resolve so we subscribe to the right collection.
+    if (tenantLoading) return;
+
     const constraints: QueryConstraint[] = [
       orderBy("createdAt", direction),
       limit(maxOrders),
@@ -57,7 +63,10 @@ export function useOrders(options: UseOrdersOptions = {}): UseOrdersReturn {
       constraints.push(where("status", "in", statusFilter));
     }
 
-    const q = query(collection(db, "orders"), ...constraints);
+    const ordersRef = restaurantId
+      ? tenantCollection(db, restaurantId, "orders")
+      : collection(db, "orders");
+    const q = query(ordersRef, ...constraints);
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
@@ -75,7 +84,7 @@ export function useOrders(options: UseOrdersOptions = {}): UseOrdersReturn {
     );
 
     return () => unsubscribe();
-  }, [maxOrders, direction, statusFilter?.join(",")]);
+  }, [maxOrders, direction, statusFilter?.join(","), restaurantId, tenantLoading]);
 
   return { orders, loading, count: orders.length };
 }

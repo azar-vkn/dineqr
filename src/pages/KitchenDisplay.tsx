@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { collection, query, where, onSnapshot, doc, updateDoc, orderBy } from "firebase/firestore";
 import { db } from "../firebase";
+import { tenantCollection, tenantDoc } from "../lib/tenant";
+import { useTenant } from "../hooks/useTenant";
 import { toast } from "sonner";
 import { Loader2, Play, CheckCircle2, AlertCircle, ChefHat, Clock } from "lucide-react";
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
@@ -9,6 +11,7 @@ import type { Order, OrderStatus } from "../types";
 export default function KitchenDisplay() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const { restaurantId, loading: tenantLoading } = useTenant();
   const prevPendingIds = useRef<Set<string>>(new Set());
   const isInitialLoad = useRef(true);
 
@@ -35,9 +38,10 @@ export default function KitchenDisplay() {
   };
 
   useEffect(() => {
+    if (tenantLoading) return;
     // Only fetch orders that need kitchen attention
     const q = query(
-      collection(db, "orders"),
+      restaurantId ? tenantCollection(db, restaurantId, "orders") : collection(db, "orders"),
       where("status", "in", ["pending", "preparing", "ready"]),
       orderBy("createdAt", "asc")
     );
@@ -82,13 +86,14 @@ export default function KitchenDisplay() {
     );
 
     return () => unsubscribe();
-  }, []);
+  }, [restaurantId, tenantLoading]);
 
   const updateOrderStatus = async (orderId: string, newStatus: OrderStatus) => {
     try {
-      await updateDoc(doc(db, "orders", orderId), {
-        status: newStatus,
-      });
+      await updateDoc(
+        restaurantId ? tenantDoc(db, restaurantId, "orders", orderId) : doc(db, "orders", orderId),
+        { status: newStatus }
+      );
       toast.success(`Order marked as ${newStatus}`);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, "orders");
