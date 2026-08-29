@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { Loader2, CreditCard, CheckCircle2, Smartphone } from "lucide-react";
 import { sanitizeText, validateOrderItems } from "../lib/sanitize";
 import { checkOrderRateLimit, formatCooldown } from "../lib/rateLimit";
-import { ORDER_LIMITS } from "../lib/constants";
+import { ORDER_LIMITS, GST_MULTIPLIER } from "../lib/constants";
 
 declare global {
   interface Window {
@@ -27,7 +27,7 @@ function generateTrackingToken(): string {
 }
 
 export default function CheckoutPage() {
-  const { items, getTotal, tableNumber, customerName, clearCart, setLastOrderId } = useCartStore();
+  const { items, getTotal, tableNumber, customerName, clearCart, setLastOrderId, orderType } = useCartStore();
   const navigate = useNavigate();
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -35,7 +35,7 @@ export default function CheckoutPage() {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const total = getTotal();
-  const finalAmount = Math.round(total * 1.05); // Including 5% tax
+  const finalAmount = Math.round(total * GST_MULTIPLIER); // subtotal + GST
 
   useEffect(() => {
     if (items.length === 0 && !orderPlaced) {
@@ -70,7 +70,7 @@ export default function CheckoutPage() {
       }
 
       const recalculatedTotal = Math.round(
-        items.reduce((sum, item) => sum + item.price * item.quantity, 0) * 1.05
+        items.reduce((sum, item) => sum + item.price * item.quantity, 0) * GST_MULTIPLIER
       );
 
       if (recalculatedTotal > ORDER_LIMITS.MAX_TOTAL) {
@@ -95,6 +95,8 @@ export default function CheckoutPage() {
         paymentStatus: "pending_collection",
         paymentMethod: "cash",
         trackingToken,
+        orderType: orderType || 'dine',
+        orderSource: 'customer',
         createdAt: serverTimestamp(),
       };
 
@@ -102,9 +104,9 @@ export default function CheckoutPage() {
 
       setOrderPlaced(true);
       clearCart();
-      setLastOrderId(docRef.id);
+      setLastOrderId(docRef.id, trackingToken);
       toast.success("Order placed! Please pay at the counter.");
-      navigate(`/order/${docRef.id}?token=${trackingToken}`);
+      navigate(`/receipt/${docRef.id}?token=${trackingToken}`);
     } catch (error: any) {
       if (import.meta.env.DEV) console.error("Cash order error:", error);
       toast.error("Failed to place order. Please try again.");
@@ -135,12 +137,11 @@ export default function CheckoutPage() {
       const result = await createOrder({
         items: items.map((item) => ({
           id: item.id,
-          name: item.name,
-          price: item.price,
           quantity: Math.max(1, Math.min(ORDER_LIMITS.MAX_QUANTITY_PER_ITEM, Math.floor(item.quantity))),
         })),
         tableNumber: tableNumber || "Unknown",
         customerName: customerName || "Guest",
+        orderType: orderType || "dine",
       });
 
       const orderData = result.data as {
@@ -148,8 +149,6 @@ export default function CheckoutPage() {
         amount: number;
         currency: string;
         keyId: string;
-        validatedItems: Array<{ id: string; name: string; price: number; quantity: number }>;
-        totalRupees: number;
       };
 
       // Step 2: Open Razorpay checkout with server-generated order
@@ -174,45 +173,26 @@ export default function CheckoutPage() {
               razorpay_signature: response.razorpay_signature,
             });
 
+            // The server verified the payment AND created the paid order
+            // itself (clients can no longer write 'paid' orders), returning
+            // the new order id + its tracking token.
             const verifyData = verifyResult.data as {
               verified: boolean;
-              razorpayOrderId: string;
-              razorpayPaymentId: string;
-              verificationToken: string;
+              orderId: string;
+              trackingToken: string;
             };
 
-            if (!verifyData.verified) {
+            if (!verifyData.verified || !verifyData.orderId) {
               toast.error("Payment verification failed. Please contact staff.");
               setIsProcessing(false);
               return;
             }
 
-            // Step 4: Write order to Firestore from client
-            // Includes verificationToken (HMAC proof from server) to prevent fake paid orders
-            const safeTableNumber = sanitizeText(tableNumber || "Unknown");
-            const safeCustomerName = sanitizeText(customerName || "Guest");
-            const trackingToken = generateTrackingToken();
-
-            const docRef = await addDoc(collection(db, "orders"), {
-              tableNumber: safeTableNumber,
-              customerName: safeCustomerName,
-              items: orderData.validatedItems,
-              total: orderData.totalRupees,
-              status: "pending",
-              paymentStatus: "paid",
-              paymentMethod: "upi",
-              razorpayOrderId: verifyData.razorpayOrderId,
-              razorpayPaymentId: verifyData.razorpayPaymentId,
-              verificationToken: verifyData.verificationToken,
-              trackingToken,
-              createdAt: serverTimestamp(),
-            });
-
             setOrderPlaced(true);
             clearCart();
-            setLastOrderId(docRef.id);
+            setLastOrderId(verifyData.orderId, verifyData.trackingToken);
             toast.success("Payment verified! Order placed.");
-            navigate(`/order/${docRef.id}?token=${trackingToken}`);
+            navigate(`/receipt/${verifyData.orderId}?token=${verifyData.trackingToken}`);
           } catch (verifyError: any) {
             if (import.meta.env.DEV) console.error("Payment verification error:", verifyError);
             toast.error(

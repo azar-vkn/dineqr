@@ -1,23 +1,13 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { useCartStore } from "../store";
 import MenuItemCard from "../components/MenuItemCard";
-import { Loader2, Search, ArrowRight } from "lucide-react";
+import { Search, ArrowRight } from "lucide-react";
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
-
-interface MenuItem {
-  id: string;
-  name: string;
-  description?: string;
-  price: number;
-  category: string;
-  image?: string;
-  available: boolean;
-  isVeg?: boolean;
-  spiceLevel?: number;
-}
+import { MenuSkeleton } from "../components/Skeletons";
+import type { MenuItem } from "../types";
 
 export default function MenuPage() {
   const { tableId } = useParams<{ tableId: string }>();
@@ -29,6 +19,7 @@ export default function MenuPage() {
   const [activeCategory, setActiveCategory] = useState<string>("All");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterVeg, setFilterVeg] = useState<"all" | "veg" | "nonveg">("all");
+  const [ratings, setRatings] = useState<Record<string, { avg: number; count: number }>>({}); 
 
   useEffect(() => {
     if (tableId) {
@@ -53,11 +44,29 @@ export default function MenuPage() {
     return () => unsubscribe();
   }, []);
 
+  // Fetch menu item ratings
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "menuRatings"), (snapshot) => {
+      const ratingsMap: Record<string, { avg: number; count: number }> = {};
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.ratingCount > 0) {
+          ratingsMap[doc.id] = {
+            avg: data.totalRating / data.ratingCount,
+            count: data.ratingCount,
+          };
+        }
+      });
+      setRatings(ratingsMap);
+    });
+    return () => unsub();
+  }, []);
+
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center h-[60vh]">
-        <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mb-4" />
-        <p className="text-stone-500 font-medium">Loading menu...</p>
+      <div className="space-y-6 pb-24">
+        <MenuSkeleton count={4} />
+        <MenuSkeleton count={2} />
       </div>
     );
   }
@@ -162,6 +171,8 @@ export default function MenuPage() {
                   available={item.available}
                   isVeg={item.isVeg}
                   spiceLevel={item.spiceLevel}
+                  avgRating={ratings[item.id]?.avg}
+                  ratingCount={ratings[item.id]?.count}
                 />
               ))}
             </div>

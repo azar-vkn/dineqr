@@ -1,35 +1,13 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
-import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, onSnapshot, setDoc, serverTimestamp, increment } from "firebase/firestore";
 import { db } from "../firebase";
-import { Loader2, CheckCircle2, Clock, ChefHat, Utensils, ArrowLeft, Star } from "lucide-react";
+import { Loader2, CheckCircle2, Clock, ArrowLeft, Star } from "lucide-react";
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
 import { sanitizeText } from "../lib/sanitize";
-
-interface OrderItem {
-  id: string;
-  name: string;
-  price: number;
-  quantity: number;
-}
-
-interface Order {
-  id: string;
-  tableNumber: string;
-  customerName?: string;
-  items: OrderItem[];
-  total: number;
-  status: "pending" | "preparing" | "ready" | "served" | "cancelled";
-  paymentStatus: string;
-  createdAt: any;
-}
-
-const STATUS_STEPS = [
-  { id: "pending", label: "Order Placed", icon: Clock, color: "text-amber-500", bgColor: "bg-amber-500", lightBg: "bg-amber-100" },
-  { id: "preparing", label: "Preparing", icon: ChefHat, color: "text-orange-500", bgColor: "bg-orange-500", lightBg: "bg-orange-100" },
-  { id: "ready", label: "Ready", icon: CheckCircle2, color: "text-emerald-500", bgColor: "bg-emerald-500", lightBg: "bg-emerald-100" },
-  { id: "served", label: "Served", icon: Utensils, color: "text-stone-500", bgColor: "bg-stone-500", lightBg: "bg-stone-100" },
-];
+import StatusTracker from "../components/StatusTracker";
+import { useCartStore } from "../store";
+import type { Order } from "../types";
 
 export default function TrackOrderPage() {
   const { orderId } = useParams<{ orderId: string }>();
@@ -55,7 +33,6 @@ export default function TrackOrderPage() {
       (docSnap) => {
         if (docSnap.exists()) {
           const data = docSnap.data();
-          // Verify tracking token if order has one
           if (data.trackingToken && data.trackingToken !== trackingToken) {
             setAccessDenied(true);
             setLoading(false);
@@ -95,13 +72,35 @@ export default function TrackOrderPage() {
     if (rating === 0) return;
     setSubmitting(true);
     try {
-      if (!orderId) return;
+      if (!orderId || !order) return;
+      
+      // Save feedback document
       await setDoc(doc(db, "feedback", orderId), {
         rating,
         comment: sanitizeText(comment.trim()),
         createdAt: serverTimestamp()
       });
-      // The onSnapshot listener will automatically update the UI
+      
+      // Clear the "Track Order" banner since feedback is complete
+      useCartStore.getState().setLastOrderId(null);
+
+      // Auto-redirect to menu after 3 seconds
+      setTimeout(() => {
+        navigate(`/table/${order.tableNumber}`);
+      }, 3000);
+      
+      // Update per-item ratings for menu stars in the background
+      const itemIds = new Set(order.items.map(item => item.id));
+      const ratingPromises = Array.from(itemIds).map(itemId =>
+        setDoc(doc(db, "menuRatings", itemId), {
+          totalRating: increment(rating),
+          ratingCount: increment(1),
+        }, { merge: true }).catch(err => console.error("Rating update failed:", err))
+      );
+      
+      // No need to await these visually
+      Promise.all(ratingPromises).catch(() => {});
+      
     } catch (error) {
       if (import.meta.env.DEV) console.error("Error submitting feedback:", error);
       alert("Failed to submit feedback. Please try again.");
@@ -155,8 +154,6 @@ export default function TrackOrderPage() {
     );
   }
 
-  const currentStepIndex = STATUS_STEPS.findIndex(s => s.id === order.status);
-
   return (
     <div className="space-y-6 max-w-2xl mx-auto pb-12">
       <div className="flex items-center gap-4">
@@ -178,44 +175,7 @@ export default function TrackOrderPage() {
           </span>
         </div>
 
-        {order.status !== "cancelled" && (
-          <div className="relative">
-            {/* Progress Bar Background */}
-            <div className="absolute top-6 left-6 right-6 h-1 bg-stone-100 rounded-full -z-10"></div>
-            
-            {/* Active Progress Bar */}
-            <div 
-              className="absolute top-6 left-6 h-1 bg-emerald-500 rounded-full -z-10 transition-all duration-500 ease-in-out"
-              style={{ width: `calc(${(currentStepIndex / (STATUS_STEPS.length - 1)) * 100}% - 24px)` }}
-            ></div>
-
-            <div className="flex justify-between relative z-10">
-              {STATUS_STEPS.map((step, index) => {
-                const isActive = index === currentStepIndex;
-                const isCompleted = index <= currentStepIndex;
-                const Icon = step.icon;
-
-                return (
-                  <div key={step.id} className="flex flex-col items-center gap-3 w-1/4">
-                    <div 
-                      className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300 border-4 border-white shadow-sm
-                        ${isActive ? `${step.bgColor} text-white scale-110 shadow-md` : 
-                          isCompleted ? 'bg-emerald-500 text-white' : 
-                          'bg-stone-100 text-stone-400'}`}
-                    >
-                      <Icon className="w-5 h-5" />
-                    </div>
-                    <span className={`text-xs sm:text-sm font-medium text-center transition-colors duration-300
-                      ${isActive ? step.color : isCompleted ? 'text-stone-800' : 'text-stone-400'}`}
-                    >
-                      {step.label}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        <StatusTracker currentStatus={order.status} />
 
         {/* Status Message */}
         <div className="mt-8 p-4 rounded-xl bg-stone-50 border border-stone-100 text-center relative overflow-hidden">
@@ -273,6 +233,18 @@ export default function TrackOrderPage() {
           <span>Total ({order.paymentStatus === "paid" ? "Paid" : "Cash"})</span>
           <span className="text-emerald-700">₹{order.total}</span>
         </div>
+
+        {/* View Receipt Link */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate(`/receipt/${orderId}${trackingToken ? `?token=${trackingToken}` : ""}`);
+          }}
+          className="w-full mt-4 py-3 bg-emerald-50 text-emerald-800 font-medium rounded-xl hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2 border border-emerald-200"
+        >
+          <span className="text-lg">🧾</span>
+          View Receipt
+        </button>
       </div>
 
       {/* Feedback Section */}

@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { useCartStore } from "../store";
 import { Minus, Plus, Trash2, ArrowRight } from "lucide-react";
 import { cn } from "../lib/utils";
+import { GST_RATE, GST_MULTIPLIER } from "../lib/constants";
 
 export default function CartPage() {
   const { items, updateQuantity, removeItem, getTotal, tableNumber } = useCartStore();
@@ -88,12 +89,12 @@ export default function CartPage() {
           </div>
           <div className="flex justify-between">
             <span>Taxes & Charges (5%)</span>
-            <span>₹{Math.round(total * 0.05)}</span>
+            <span>₹{Math.round(total * GST_RATE)}</span>
           </div>
         </div>
         <div className="pt-4 border-t border-stone-100 flex justify-between items-center font-bold text-lg text-stone-900">
           <span>To Pay</span>
-          <span>₹{Math.round(total * 1.05)}</span>
+          <span>₹{Math.round(total * GST_MULTIPLIER)}</span>
         </div>
       </div>
 

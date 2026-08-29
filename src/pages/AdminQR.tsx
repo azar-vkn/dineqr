@@ -7,9 +7,14 @@ export default function AdminQR() {
   const [tableCount, setTableCount] = useState(10);
   const [printTarget, setPrintTarget] = useState<number | null>(null);
   
-  // Dynamically use the current domain so QR codes work on any deployment
-  const appUrl = window.location.origin;
-  const baseUrl = `${appUrl}/table/`;
+  // The QR must point to a PUBLIC url a customer's phone can reach.
+  // In the desktop (Electron) build window.location.origin is "file://",
+  // which is useless when scanned — so prefer the deployed site URL from
+  // VITE_PUBLIC_APP_URL and only fall back to the current origin on web.
+  // The "/#/" is required because the app uses HashRouter.
+  const appUrl = (import.meta.env.VITE_PUBLIC_APP_URL || window.location.origin).replace(/\/$/, "");
+  const isPublicUrl = /^https?:\/\//.test(appUrl);
+  const baseUrl = `${appUrl}/#/table/`;
 
   useEffect(() => {
     const handleAfterPrint = () => setPrintTarget(null);
@@ -30,11 +35,21 @@ export default function AdminQR() {
           <div>
             <h1 className="text-2xl font-bold text-stone-900 tracking-tight">QR Code Generator</h1>
             <p className="text-stone-500 mt-1">Generate and print QR codes for your restaurant tables.</p>
-            <div className="mt-3 bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-3 rounded-lg flex items-start gap-3">
-              <div className="mt-0.5">⚠️</div>
-              <div>
-                <p className="font-semibold">Important:</p>
-                <p>For customers to scan these QR codes, you must first <strong>Share</strong> this app using the Share button in the top right corner of AI Studio.</p>
+            <div className={cn(
+              "mt-3 border text-sm px-4 py-3 rounded-lg flex items-start gap-3",
+              isPublicUrl ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-amber-50 border-amber-200 text-amber-800"
+            )}>
+              <div className="mt-0.5">{isPublicUrl ? "🔗" : "⚠️"}</div>
+              <div className="min-w-0">
+                <p className="font-semibold">Scanning a QR opens:</p>
+                <p className="font-mono break-all">{baseUrl}&lt;table&gt;</p>
+                {!isPublicUrl && (
+                  <p className="mt-1">
+                    This is a local path and <strong>won't work on a phone</strong>. Deploy the menu
+                    (<code>firebase deploy --only hosting</code>), set <strong>VITE_PUBLIC_APP_URL</strong>
+                    to your live site (e.g. <code>https://your-site.web.app</code>), then rebuild.
+                  </p>
+                )}
               </div>
             </div>
           </div>

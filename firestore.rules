@@ -40,11 +40,21 @@ service cloud.firestore {
       );
     }
 
+    function isCook() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.token.email)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.token.email)).data.role == 'cook';
+    }
+
     function isValidUser(data) {
-      return data.keys().hasAll(['email', 'role', 'createdAt']) &&
+      return data.keys().hasAll(['email', 'role', 'createdAt', 'displayName', 'phone', 'staffId', 'status']) &&
              data.email is string && data.email.size() > 0 && data.email.size() <= 320 &&
-             data.role in ['admin', 'staff'] &&
-             data.createdAt is timestamp;
+             data.role in ['admin', 'staff', 'cook'] &&
+             data.createdAt is timestamp &&
+             data.displayName is string && data.displayName.size() > 0 && data.displayName.size() <= 100 &&
+             data.phone is string && data.phone.size() >= 10 && data.phone.size() <= 15 &&
+             data.staffId is string && data.staffId.size() > 0 && data.staffId.size() <= 20 &&
+             data.status in ['active', 'inactive'];
     }
 
     function isValidMenuItem(data) {
@@ -81,7 +91,12 @@ service cloud.firestore {
              // Timestamp validation
              data.createdAt is timestamp &&
              // Tracking token — random string for secure order tracking
-             data.trackingToken is string && data.trackingToken.size() >= 16 && data.trackingToken.size() <= 64;
+             data.trackingToken is string && data.trackingToken.size() >= 16 && data.trackingToken.size() <= 64 &&
+             // Order source (optional) — customer or staff
+             (!('orderSource' in data) || data.orderSource in ['customer', 'staff']) &&
+             // Staff order fields (optional)
+             (!('staffId' in data) || (data.staffId is string && data.staffId.size() <= 20)) &&
+             (!('staffName' in data) || (data.staffName is string && data.staffName.size() <= 100));
     }
 
     // Validates that paid (online) orders have valid Razorpay fields
@@ -134,18 +149,42 @@ service cloud.firestore {
 
     // ─── Orders Collection ───────────────────────────────────
     match /orders/{orderId} {
-      // Client-side order creation — validated by payment type
-      allow create: if isValidOrderBase(request.resource.data)
-                    && request.resource.data.status == 'pending'
-                    && request.resource.data.createdAt == request.time
-                    // Must be EITHER a valid paid order OR a valid cash order
-                    && (isValidPaidOrder(request.resource.data) || isValidCashOrder(request.resource.data));
+      // Client-side order creation — CASH ONLY.
+      // PAID (online) orders are created exclusively server-side by the
+      // verifyRazorpayPayment Cloud Function (Admin SDK), so a client can
+      // never forge a 'paid' order. Any client attempt to write paid here
+      // is rejected because isValidCashOrder requires paymentStatus
+      // 'pending_collection' and forbids razorpay fields.
+      // NOTE: deploy this ONLY together with the updated functions + client
+      // (Blaze coordinated deploy) — deploying it alone breaks online payments.
+      // Customer orders (unauthenticated QR-scan flow)
+      allow create: if (
+                      isValidOrderBase(request.resource.data)
+                      && request.resource.data.status == 'pending'
+                      && request.resource.data.createdAt == request.time
+                      && isValidCashOrder(request.resource.data)
+                    )
+                    ||
+                    // Staff orders (authenticated staff placing order for customer)
+                    (
+                      isStaff()
+                      && isValidOrderBase(request.resource.data)
+                      && request.resource.data.status == 'pending'
+                      && request.resource.data.createdAt == request.time
+                      && isValidCashOrder(request.resource.data)
+                      && request.resource.data.orderSource == 'staff'
+                      && 'staffId' in request.resource.data
+                      && 'staffName' in request.resource.data
+                    );
       
       // Anyone can GET a single order by ID (for tracking via URL)
       // Only staff/admin can LIST (query) all orders
       allow get: if true;
-      allow list: if isStaff();
-      allow update: if isStaff() && isValidOrderBase(request.resource.data);
+      allow list: if isStaff() || isCook();
+      allow update: if (isStaff() && isValidOrderBase(request.resource.data)) ||
+                       (isCook() && 
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+                        request.resource.data.status in ['preparing', 'ready']);
       allow delete: if isAdmin();
     }
 
@@ -174,9 +213,45 @@ service cloud.firestore {
       // No update or delete — feedback is immutable
     }
 
+    // ─── Menu Ratings Collection ──────────────────────────────
+    // Aggregated star ratings per menu item
+    match /menuRatings/{itemId} {
+      allow read: if true;
+      // First rating for an item: count starts at 1, rating within 1..5.
+      allow create: if request.resource.data.keys().hasOnly(['totalRating', 'ratingCount'])
+                    && request.resource.data.ratingCount == 1
+                    && request.resource.data.totalRating is number
+                    && request.resource.data.totalRating >= 1
+                    && request.resource.data.totalRating <= 5;
+      // Subsequent ratings must be append-only bounded increments — this
+      // blocks the previous hole where anyone could overwrite the aggregate
+      // with arbitrary numbers. (Per-order de-dup belongs in a Cloud Function.)
+      allow update: if request.resource.data.keys().hasOnly(['totalRating', 'ratingCount'])
+                    && request.resource.data.ratingCount == resource.data.ratingCount + 1
+                    && request.resource.data.totalRating - resource.data.totalRating >= 1
+                    && request.resource.data.totalRating - resource.data.totalRating <= 5;
+      allow delete: if false;
+    }
+
     // ─── Reports Collection ──────────────────────────────────
     match /reports/{reportId} {
       allow read, write: if isStaff();
+    }
+
+    // ─── Bills Collection ─────────────────────────────────────
+    // Server-generated only (via Cloud Functions Admin SDK)
+    // Clients can read their own bill by orderId, staff can list all
+    match /bills/{billId} {
+      allow get: if true;
+      allow list: if isStaff();
+      // No client writes — bills are only created by Cloud Functions
+      allow create, update, delete: if false;
+    }
+
+    // ─── Counters Collection ─────────────────────────────────
+    // Internal counters for bill numbering — no client access
+    match /counters/{counterId} {
+      allow read, write: if false;
     }
 
     // ═══════════════════════════════════════════════════════════

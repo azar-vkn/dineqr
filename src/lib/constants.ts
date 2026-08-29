@@ -29,6 +29,16 @@ export const ORDER_LIMITS = {
 } as const;
 
 /**
+ * GST / tax rate applied to customer orders (display side).
+ * NOTE: the *authoritative* order total is computed server-side in the Cloud
+ * Functions; these constants only keep the client UI consistent and in one
+ * place. If you change the rate, update the Cloud Function too.
+ */
+export const GST_RATE = 0.05;
+export const GST_MULTIPLIER = 1 + GST_RATE; // 1.05
+export const GST_PERCENT = Math.round(GST_RATE * 100); // 5
+
+/**
  * Rate limiting config
  */
 export const RATE_LIMIT = {

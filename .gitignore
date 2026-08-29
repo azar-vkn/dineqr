@@ -1,5 +1,4 @@
 node_modules/
-build/
 dist/
 coverage/
 .firebase/
@@ -7,3 +6,13 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Secrets / credentials — NEVER commit
+client_secret_*.json
+*service-account*.json
+*serviceaccount*.json
+*.pem
+
+# Electron
+release/
+electron/dist/

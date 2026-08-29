@@ -1,5 +1,5 @@
 import React from "react";
-import { Plus, Minus, Flame } from "lucide-react";
+import { Plus, Minus, Flame, Star } from "lucide-react";
 import { useCartStore } from "../store";
 import { cn } from "../lib/utils";
 
@@ -12,9 +12,11 @@ interface MenuItemProps {
   available: boolean;
   isVeg?: boolean;
   spiceLevel?: number;
+  avgRating?: number;
+  ratingCount?: number;
 }
 
-const MenuItemCard: React.FC<MenuItemProps> = ({ id, name, description, price, image, available, isVeg, spiceLevel }) => {
+const MenuItemCard: React.FC<MenuItemProps> = ({ id, name, description, price, image, available, isVeg, spiceLevel, avgRating, ratingCount }) => {
   const { items, addItem, updateQuantity } = useCartStore();
   
   const cartItem = items.find(i => i.id === id);
@@ -53,6 +55,26 @@ const MenuItemCard: React.FC<MenuItemProps> = ({ id, name, description, price, i
           <p className="text-emerald-700 font-medium mt-1">₹{price}</p>
           {description && (
             <p className="text-sm text-stone-500 mt-2 line-clamp-2">{description}</p>
+          )}
+          {avgRating !== undefined && ratingCount !== undefined && ratingCount > 0 && (
+            <div className="flex items-center gap-1.5 mt-2">
+              <div className="flex items-center">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <Star
+                    key={star}
+                    className={cn(
+                      "w-3.5 h-3.5",
+                      star <= Math.round(avgRating)
+                        ? "text-amber-400 fill-amber-400"
+                        : "text-stone-200 fill-stone-200"
+                    )}
+                  />
+                ))}
+              </div>
+              <span className="text-xs text-stone-400 font-medium">
+                {avgRating.toFixed(1)} ({ratingCount})
+              </span>
+            </div>
           )}
         </div>
         

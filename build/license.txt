@@ -1,0 +1,34 @@
+DineQR — End User License Agreement
+
+Copyright (c) 2026. All rights reserved.
+
+Please read the following terms carefully before installing DineQR
+("the Software").
+
+1. LICENSE GRANT
+   Subject to the terms of this Agreement, you are granted a
+   non-exclusive, non-transferable license to install and use the
+   Software for operating your restaurant ordering system.
+
+2. RESTRICTIONS
+   You may not copy, modify, distribute, sell, sublicense, or
+   reverse-engineer the Software except to the extent permitted by
+   applicable law.
+
+3. DATA & PAYMENTS
+   The Software connects to third-party services (including Firebase
+   and payment providers) to deliver ordering and payment features.
+   Your use of those services is governed by their respective terms.
+   You are responsible for the accuracy of menu, pricing, and payment
+   configuration.
+
+4. NO WARRANTY
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+
+5. LIMITATION OF LIABILITY
+   IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM,
+   DAMAGES, OR OTHER LIABILITY ARISING FROM THE USE OF THE SOFTWARE.
+
+By clicking "I Agree" you accept the terms of this Agreement.

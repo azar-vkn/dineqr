@@ -6,7 +6,36 @@ import {
   initializeAppCheck,
   ReCaptchaEnterpriseProvider,
 } from "firebase/app-check";
-import firebaseConfig from "../firebase-applet-config.json";
+
+// ── Firebase Configuration ───────────────────────────────────
+// Read from environment variables (preferred) with fallback to
+// the static config file for backward compatibility with web deploys.
+let firebaseConfig: Record<string, string>;
+
+const envApiKey = (import.meta as any).env?.VITE_FIREBASE_API_KEY;
+
+if (envApiKey) {
+  // Use environment variables (desktop / custom builds)
+  firebaseConfig = {
+    apiKey: envApiKey,
+    authDomain: (import.meta as any).env?.VITE_FIREBASE_AUTH_DOMAIN || "",
+    projectId: (import.meta as any).env?.VITE_FIREBASE_PROJECT_ID || "",
+    storageBucket: (import.meta as any).env?.VITE_FIREBASE_STORAGE_BUCKET || "",
+    messagingSenderId: (import.meta as any).env?.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
+    appId: (import.meta as any).env?.VITE_FIREBASE_APP_ID || "",
+    firestoreDatabaseId: (import.meta as any).env?.VITE_FIREBASE_FIRESTORE_DB_ID || "(default)",
+  };
+} else {
+  // Fallback: static JSON config (Firebase Hosting / legacy)
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    firebaseConfig = (await import("../firebase-applet-config.json")).default;
+  } catch {
+    throw new Error(
+      "[DineQR] Firebase config not found. Set VITE_FIREBASE_* env vars or provide firebase-applet-config.json"
+    );
+  }
+}
 
 const app = initializeApp(firebaseConfig);
 
@@ -30,6 +59,7 @@ if (recaptchaSiteKey) {
 }
 
 // ── Exports ─────────────────────────────────────────────────
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+const firestoreDbId = (firebaseConfig as any).firestoreDatabaseId || "(default)";
+export const db = getFirestore(app, firestoreDbId);
 export const auth = getAuth(app);
 export const functions = getFunctions(app);
