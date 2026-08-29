@@ -4,7 +4,7 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as logger from "firebase-functions/logger";
 import * as crypto from "crypto";
 import * as admin from "firebase-admin";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { getFirestore, FieldValue, DocumentReference } from "firebase-admin/firestore";
 
 const app = admin.initializeApp();
 const FIRESTORE_DB_ID = "ai-studio-59943d32-4256-4962-9722-8ed736fd2e8e";
@@ -104,6 +104,13 @@ function pendingOrderPath(restaurantId: string | undefined, id: string): string 
 }
 function ordersPath(restaurantId: string | undefined): string {
   return restaurantId ? `restaurants/${restaurantId}/orders` : "orders";
+}
+function billDocPath(restaurantId: string | undefined, orderId: string): string {
+  return restaurantId ? `restaurants/${restaurantId}/bills/${orderId}` : `bills/${orderId}`;
+}
+function billCounterPath(restaurantId: string | undefined, dateStr: string): string {
+  const docId = `bills-${dateStr}`;
+  return restaurantId ? `restaurants/${restaurantId}/counters/${docId}` : `counters/${docId}`;
 }
 // Per-restaurant Razorpay creds live in restaurants/{rid}/private/razorpay
 // (Admin-SDK only; clients are denied by rules). Legacy uses env vars.
@@ -529,110 +536,130 @@ export const dailyRevenueReport = onSchedule(
 // ─────────────────────────────────────────────
 // 3. Auto-Generate Bill on Order Creation
 // ─────────────────────────────────────────────
-// Firestore trigger — runs server-side via Admin SDK,
-// so bills can never be forged by a client.
+// Shared logic behind both the legacy top-level trigger and the per-tenant
+// trigger. Runs server-side via Admin SDK, so bills can't be forged.
+async function generateBill(
+  restaurantId: string | undefined,
+  orderId: string,
+  orderData: any,
+  orderRef: DocumentReference
+): Promise<void> {
+  try {
+    // Sequential bill number: BILL-YYYYMMDD-XXXX (counter scoped per tenant).
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+
+    const counterRef = firestoreDb.doc(billCounterPath(restaurantId, dateStr));
+    const counterResult = await firestoreDb.runTransaction(async (tx) => {
+      const counterDoc = await tx.get(counterRef);
+      let nextNum = 1;
+      if (counterDoc.exists) {
+        nextNum = (counterDoc.data()?.count || 0) + 1;
+      }
+      tx.set(counterRef, { count: nextNum, date: dateStr });
+      return nextNum;
+    });
+
+    const billNumber = `BILL-${dateStr}-${String(counterResult).padStart(4, "0")}`;
+
+    // Authoritative itemized breakdown — re-price from the tenant's menu so the
+    // bill (the money of record) can't be skewed by a tampered client.
+    const rawItems = (orderData.items || []) as any[];
+    const billItemIds = [
+      ...new Set(rawItems.map((i) => String(i?.id || ""))),
+    ].filter((id) => id.length > 0);
+    const priceById = new Map<string, { name: string; price: number }>();
+    if (billItemIds.length > 0) {
+      const snaps = await firestoreDb.getAll(
+        ...billItemIds.map((id) => firestoreDb.doc(menuDocPath(restaurantId, id)))
+      );
+      snaps.forEach((s) => {
+        if (s.exists) {
+          const d = s.data() as any;
+          priceById.set(s.id, { name: String(d.name), price: Number(d.price) });
+        }
+      });
+    }
+
+    const items = rawItems.map((item: any) => {
+      const authoritative = priceById.get(String(item?.id || ""));
+      const unitPrice = authoritative ? authoritative.price : Number(item.price) || 0;
+      const name = authoritative ? authoritative.name : String(item.name || "Unknown");
+      const quantity = Number(item.quantity) || 1;
+      return { name, quantity, unitPrice, subtotal: unitPrice * quantity };
+    });
+
+    const subtotal = items.reduce((sum: number, item: any) => sum + item.subtotal, 0);
+    const gstRate = 5; // 5% GST
+    const gstAmount = Math.round(subtotal * (gstRate / 100));
+    const total = subtotal + gstAmount;
+
+    const billData = {
+      orderId,
+      billNumber,
+      tableNumber: orderData.tableNumber || "Unknown",
+      customerName: orderData.customerName || "Guest",
+      orderType: orderData.orderType || "dine",
+      items,
+      subtotal,
+      gstRate,
+      gstAmount,
+      total,
+      paymentMethod: orderData.paymentMethod || "cash",
+      paymentStatus: orderData.paymentStatus || "pending_collection",
+      razorpayPaymentId: orderData.razorpayPaymentId || null,
+      trackingToken: orderData.trackingToken || null,
+      createdAt: FieldValue.serverTimestamp(),
+    };
+
+    await firestoreDb.doc(billDocPath(restaurantId, orderId)).set(billData);
+
+    // Keep the order's displayed total in sync with the authoritative bill.
+    if (Number(orderData.total) !== total) {
+      await orderRef
+        .update({ total })
+        .catch((e) => logger.warn("Could not sync order total", { orderId, e }));
+    }
+
+    logger.info(`Bill generated: ${billNumber} for order ${orderId}`, {
+      restaurantId: restaurantId || "(legacy)",
+    });
+  } catch (error) {
+    logger.error("Error generating bill:", { orderId, restaurantId, error });
+    // Don't throw — we don't want to retry bill generation endlessly.
+  }
+}
+
+// Legacy top-level orders (single-tenant transition).
 export const onOrderCreated = onDocumentCreated(
-  {
-    document: "orders/{orderId}",
-    database: FIRESTORE_DB_ID,
-  },
+  { document: "orders/{orderId}", database: FIRESTORE_DB_ID },
   async (event) => {
     const snapshot = event.data;
     if (!snapshot) {
       logger.warn("onOrderCreated: No data in event");
       return;
     }
+    await generateBill(undefined, event.params.orderId, snapshot.data(), snapshot.ref);
+  }
+);
 
-    const orderId = event.params.orderId;
-    const orderData = snapshot.data();
-
-    try {
-      // Generate sequential bill number: BILL-YYYYMMDD-XXXX
-      const now = new Date();
-      const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
-
-      // Atomic counter for daily bill numbers
-      const counterRef = firestoreDb.doc(`counters/bills-${dateStr}`);
-      const counterResult = await firestoreDb.runTransaction(async (tx) => {
-        const counterDoc = await tx.get(counterRef);
-        let nextNum = 1;
-        if (counterDoc.exists) {
-          nextNum = (counterDoc.data()?.count || 0) + 1;
-        }
-        tx.set(counterRef, { count: nextNum, date: dateStr });
-        return nextNum;
-      });
-
-      const billNumber = `BILL-${dateStr}-${String(counterResult).padStart(4, "0")}`;
-
-      // Authoritative itemized breakdown — re-price from the menu so the
-      // bill (the money of record) can't be skewed by a tampered client.
-      const rawItems = (orderData.items || []) as any[];
-      const billItemIds = [
-        ...new Set(rawItems.map((i) => String(i?.id || ""))),
-      ].filter((id) => id.length > 0);
-      const priceById = new Map<string, { name: string; price: number }>();
-      if (billItemIds.length > 0) {
-        const snaps = await firestoreDb.getAll(
-          ...billItemIds.map((id) => firestoreDb.doc(`menu/${id}`))
-        );
-        snaps.forEach((s) => {
-          if (s.exists) {
-            const d = s.data() as any;
-            priceById.set(s.id, { name: String(d.name), price: Number(d.price) });
-          }
-        });
-      }
-
-      const items = rawItems.map((item: any) => {
-        const authoritative = priceById.get(String(item?.id || ""));
-        const unitPrice = authoritative ? authoritative.price : Number(item.price) || 0;
-        const name = authoritative ? authoritative.name : String(item.name || "Unknown");
-        const quantity = Number(item.quantity) || 1;
-        return { name, quantity, unitPrice, subtotal: unitPrice * quantity };
-      });
-
-      const subtotal = items.reduce(
-        (sum: number, item: any) => sum + item.subtotal,
-        0
-      );
-      const gstRate = 5; // 5% GST
-      const gstAmount = Math.round(subtotal * (gstRate / 100));
-      const total = subtotal + gstAmount;
-
-      const billData = {
-        orderId,
-        billNumber,
-        tableNumber: orderData.tableNumber || "Unknown",
-        customerName: orderData.customerName || "Guest",
-        orderType: orderData.orderType || "dine",
-        items,
-        subtotal,
-        gstRate,
-        gstAmount,
-        total,
-        paymentMethod: orderData.paymentMethod || "cash",
-        paymentStatus: orderData.paymentStatus || "pending_collection",
-        razorpayPaymentId: orderData.razorpayPaymentId || null,
-        // Carry the order's tracking token so the receipt page can gate access.
-        trackingToken: orderData.trackingToken || null,
-        createdAt: FieldValue.serverTimestamp(),
-      };
-
-      // Write bill doc keyed by orderId for easy lookup
-      await firestoreDb.doc(`bills/${orderId}`).set(billData);
-
-      // Keep the order's displayed total in sync with the authoritative bill.
-      if (Number(orderData.total) !== total) {
-        await snapshot.ref
-          .update({ total })
-          .catch((e) => logger.warn("Could not sync order total", { orderId, e }));
-      }
-
-      logger.info(`Bill generated: ${billNumber} for order ${orderId}`);
-    } catch (error) {
-      logger.error("Error generating bill:", { orderId, error });
-      // Don't throw — we don't want to retry bill generation endlessly
+// Per-tenant orders: restaurants/{restaurantId}/orders/{orderId}
+export const onTenantOrderCreated = onDocumentCreated(
+  {
+    document: "restaurants/{restaurantId}/orders/{orderId}",
+    database: FIRESTORE_DB_ID,
+  },
+  async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) {
+      logger.warn("onTenantOrderCreated: No data in event");
+      return;
     }
+    await generateBill(
+      event.params.restaurantId,
+      event.params.orderId,
+      snapshot.data(),
+      snapshot.ref
+    );
   }
 );
