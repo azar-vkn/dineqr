@@ -177,6 +177,7 @@ export default function CheckoutPage() {
               razorpay_order_id: response.razorpay_order_id,
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_signature: response.razorpay_signature,
+              restaurantId: restaurantId || null,
             });
 
             // The server verified the payment AND created the paid order

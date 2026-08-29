@@ -93,6 +93,39 @@ function isValidRazorpayId(id: unknown, prefix: string): boolean {
   return id.startsWith(prefix) && id.length >= 10 && id.length <= 60;
 }
 
+// ── Multi-tenant path & credential helpers (Phase 3) ──────────
+// With a restaurantId, everything lives under restaurants/{rid}/…; otherwise
+// fall back to the legacy top-level layout (single-tenant transition).
+function menuDocPath(restaurantId: string | undefined, itemId: string): string {
+  return restaurantId ? `restaurants/${restaurantId}/menu/${itemId}` : `menu/${itemId}`;
+}
+function pendingOrderPath(restaurantId: string | undefined, id: string): string {
+  return restaurantId ? `restaurants/${restaurantId}/pendingOrders/${id}` : `pendingOrders/${id}`;
+}
+function ordersPath(restaurantId: string | undefined): string {
+  return restaurantId ? `restaurants/${restaurantId}/orders` : "orders";
+}
+// Per-restaurant Razorpay creds live in restaurants/{rid}/private/razorpay
+// (Admin-SDK only; clients are denied by rules). Legacy uses env vars.
+async function getRazorpayCreds(
+  restaurantId: string | undefined
+): Promise<{ keyId: string; keySecret: string }> {
+  if (restaurantId) {
+    const snap = await firestoreDb.doc(`restaurants/${restaurantId}/private/razorpay`).get();
+    const d = snap.data();
+    if (d?.keyId && d?.keySecret) {
+      return { keyId: String(d.keyId), keySecret: String(d.keySecret) };
+    }
+    throw new HttpsError("failed-precondition", "This restaurant hasn't set up online payments yet.");
+  }
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  if (!keyId || !keySecret) {
+    throw new HttpsError("internal", "Payment system not configured.");
+  }
+  return { keyId, keySecret };
+}
+
 // ─────────────────────────────────────────────
 // 1. Create Razorpay Order
 // ─────────────────────────────────────────────
@@ -108,6 +141,9 @@ export const createRazorpayOrder = onCall({ enforceAppCheck: false }, async (req
 
   try {
     const { items, tableNumber, customerName, orderType } = request.data || {};
+    const rawRid = request.data?.restaurantId;
+    const restaurantId: string | undefined =
+      typeof rawRid === "string" && rawRid ? rawRid : undefined;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       throw new HttpsError("invalid-argument", "Cart is empty.");
@@ -128,7 +164,7 @@ export const createRazorpayOrder = onCall({ enforceAppCheck: false }, async (req
     }
 
     const menuSnaps = await firestoreDb.getAll(
-      ...uniqueIds.map((id) => firestoreDb.doc(`menu/${id}`))
+      ...uniqueIds.map((id) => firestoreDb.doc(menuDocPath(restaurantId, id)))
     );
     const menuById = new Map<string, any>();
     menuSnaps.forEach((snap) => {
@@ -181,14 +217,8 @@ export const createRazorpayOrder = onCall({ enforceAppCheck: false }, async (req
       throw new HttpsError("invalid-argument", "Invalid order amount.");
     }
 
-    // Create Razorpay order via REST API
-    const keyId = process.env.RAZORPAY_KEY_ID;
-    const keySecret = process.env.RAZORPAY_KEY_SECRET;
-
-    if (!keyId || !keySecret) {
-      logger.error("Razorpay keys not configured in functions/.env");
-      throw new HttpsError("internal", "Payment system not configured.");
-    }
+    // Create Razorpay order via REST API — use the tenant's own keys.
+    const { keyId, keySecret } = await getRazorpayCreds(restaurantId);
 
     const safeTable = sanitizeString(tableNumber, 20) || "Unknown";
     const safeName = sanitizeString(customerName, 100) || "Guest";
@@ -228,13 +258,14 @@ export const createRazorpayOrder = onCall({ enforceAppCheck: false }, async (req
 
     // Stash the server-validated order so verifyRazorpayPayment can create
     // the real order itself. Clients must never write 'paid' orders.
-    await firestoreDb.doc(`pendingOrders/${razorpayOrder.id}`).set({
+    await firestoreDb.doc(pendingOrderPath(restaurantId, razorpayOrder.id)).set({
       items: validatedItems,
       total: finalAmountRupees,
       tableNumber: safeTable,
       customerName: safeName,
       orderType: orderType === "parcel" ? "parcel" : "dine",
       amountPaise: amountInPaise,
+      restaurantId: restaurantId || null,
       createdAt: FieldValue.serverTimestamp(),
     });
 
@@ -267,6 +298,9 @@ export const verifyRazorpayPayment = onCall({ enforceAppCheck: false }, async (r
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
       request.data || {};
+    const rawRid = request.data?.restaurantId;
+    const restaurantId: string | undefined =
+      typeof rawRid === "string" && rawRid ? rawRid : undefined;
 
     // Validate input formats
     if (!isValidRazorpayId(razorpay_order_id, "order_")) {
@@ -294,12 +328,8 @@ export const verifyRazorpayPayment = onCall({ enforceAppCheck: false }, async (r
       );
     }
 
-    // HMAC SHA256 signature verification
-    const keySecret = process.env.RAZORPAY_KEY_SECRET;
-    if (!keySecret) {
-      logger.error("Razorpay key secret not configured");
-      throw new HttpsError("internal", "Payment system not configured.");
-    }
+    // HMAC SHA256 signature verification — use the tenant's own key secret.
+    const { keySecret } = await getRazorpayCreds(restaurantId);
 
     const expectedSignature = crypto
       .createHmac("sha256", keySecret)
@@ -322,7 +352,7 @@ export const verifyRazorpayPayment = onCall({ enforceAppCheck: false }, async (r
     // Idempotency — if we already created the order for this payment, reuse it
     // (handles double-clicks / retried verifications).
     const existing = await firestoreDb
-      .collection("orders")
+      .collection(ordersPath(restaurantId))
       .where("razorpayOrderId", "==", razorpay_order_id)
       .limit(1)
       .get();
@@ -336,7 +366,7 @@ export const verifyRazorpayPayment = onCall({ enforceAppCheck: false }, async (r
     }
 
     // Pull the server-validated cart stashed by createRazorpayOrder.
-    const pendingRef = firestoreDb.doc(`pendingOrders/${razorpay_order_id}`);
+    const pendingRef = firestoreDb.doc(pendingOrderPath(restaurantId, razorpay_order_id));
     const pendingSnap = await pendingRef.get();
     if (!pendingSnap.exists) {
       logger.error("No pending order for verified payment", { razorpay_order_id });
@@ -350,7 +380,7 @@ export const verifyRazorpayPayment = onCall({ enforceAppCheck: false }, async (r
     // Create the PAID order server-side. The Admin SDK bypasses Firestore
     // rules, so a 'paid' order can never be forged by a client.
     const trackingToken = crypto.randomBytes(24).toString("hex");
-    const orderRef = await firestoreDb.collection("orders").add({
+    const orderRef = await firestoreDb.collection(ordersPath(restaurantId)).add({
       tableNumber: pending.tableNumber || "Unknown",
       customerName: pending.customerName || "Guest",
       items: pending.items || [],
