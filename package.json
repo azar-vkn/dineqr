@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
+    "test:rules": "firebase emulators:exec --only firestore \"node tests/firestore-rules.test.mjs\"",
     "electron:compile": "tsc -p electron/tsconfig.json && node -e \"const fs=require('fs');const p=require('path');['main','preload'].forEach(f=>{const s=p.join('electron','dist',f+'.js');const d=p.join('electron','dist',f+'.cjs');if(fs.existsSync(s)){fs.renameSync(s,d)}});\"",
     "electron:dev": "npm run electron:compile && concurrently -k \"vite\" \"wait-on http://localhost:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
     "electron:build": "npm run build && npm run electron:compile && electron-builder",
@@ -32,6 +33,7 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@tailwindcss/vite": "^4.1.14",
     "@types/node": "^22.14.0",
     "@types/react": "^19.2.14",
