@@ -25,6 +25,7 @@ const AdminBilling = lazy(() => import("./pages/AdminBilling"));
 const KitchenDisplay = lazy(() => import("./pages/KitchenDisplay"));
 const AdminPos = lazy(() => import("./pages/AdminPos"));
 const AdminPurchases = lazy(() => import("./pages/AdminPurchases"));
+const PlatformConsole = lazy(() => import("./pages/PlatformConsole"));
 
 // ─── Loading Fallback ────────────────────────────────────────
 function PageLoader() {
@@ -99,6 +100,13 @@ export default function App() {
             <Route path="/r/:restaurantId/receipt/:orderId" element={
               <RouteErrorBoundary routeName="Receipt">
                 <Layout><ReceiptPage /></Layout>
+              </RouteErrorBoundary>
+            } />
+
+            {/* Provider platform console — self-gated to platform admins */}
+            <Route path="/platform" element={
+              <RouteErrorBoundary routeName="Platform Console">
+                <PlatformConsole />
               </RouteErrorBoundary>
             } />
 

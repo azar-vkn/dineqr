@@ -11,7 +11,7 @@ const FIRESTORE_DB_ID = "ai-studio-59943d32-4256-4962-9722-8ed736fd2e8e";
 const firestoreDb = getFirestore(app, FIRESTORE_DB_ID);
 
 // ── Multi-tenant provisioning (Phase 3) — additive, platform-admin gated ──
-export { claimPlatformAdmin, createRestaurant, assignUserToRestaurant } from "./tenant";
+export { claimPlatformAdmin, createRestaurant, assignUserToRestaurant, setRestaurantRazorpay } from "./tenant";
 
 // ═══════════════════════════════════════════════════════════════
 // DineQR Cloud Functions — Razorpay Payment Backend (Hardened)

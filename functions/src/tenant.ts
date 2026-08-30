@@ -119,3 +119,43 @@ export const assignUserToRestaurant = onCall(async (request) => {
   logger.info("User assigned to restaurant", { uid: user.uid, restaurantId, role });
   return { uid: user.uid, note: "User must refresh their ID token to apply the new role." };
 });
+
+// ─────────────────────────────────────────────
+// Set a restaurant's own Razorpay credentials.
+// Public key id goes on the tenant doc; the secret goes in the locked
+// restaurants/{rid}/private/razorpay doc (Admin-SDK only, clients denied).
+// ─────────────────────────────────────────────
+export const setRestaurantRazorpay = onCall(async (request) => {
+  const token = request.auth?.token as Record<string, unknown> | undefined;
+  const { restaurantId, keyId, keySecret } = request.data || {};
+
+  if (
+    typeof restaurantId !== "string" ||
+    typeof keyId !== "string" ||
+    typeof keySecret !== "string" ||
+    keyId.length === 0 ||
+    keySecret.length === 0
+  ) {
+    throw new HttpsError("invalid-argument", "restaurantId, keyId and keySecret are required.");
+  }
+
+  const isPlatformAdmin = token?.platformAdmin === true;
+  const isRestaurantAdmin = token?.restaurantId === restaurantId && token?.role === "admin";
+  if (!isPlatformAdmin && !isRestaurantAdmin) {
+    throw new HttpsError("permission-denied", "Not allowed to manage this restaurant.");
+  }
+
+  const restSnap = await db.collection("restaurants").doc(restaurantId).get();
+  if (!restSnap.exists) {
+    throw new HttpsError("not-found", "Restaurant does not exist.");
+  }
+
+  await db.doc(`restaurants/${restaurantId}`).set({ razorpayKeyId: keyId }, { merge: true });
+  await db.doc(`restaurants/${restaurantId}/private/razorpay`).set(
+    { keyId, keySecret, updatedAt: FieldValue.serverTimestamp() },
+    { merge: true }
+  );
+
+  logger.info("Razorpay creds set for restaurant", { restaurantId });
+  return { ok: true };
+});
