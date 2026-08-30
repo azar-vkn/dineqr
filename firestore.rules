@@ -126,6 +126,31 @@ service cloud.firestore {
              !('verificationToken' in data);
     }
 
+    // ── Multi-tenant claims-based access (Phase 3) ───────────
+    // Staff/admins carry { restaurantId, role } custom claims; the provider
+    // team carries { platformAdmin: true }. .get() avoids errors on missing claims.
+    function isPlatformAdmin() {
+      return isAuthenticated() && request.auth.token.get('platformAdmin', false) == true;
+    }
+    function belongsTo(rid) {
+      return isAuthenticated() && request.auth.token.get('restaurantId', '') == rid;
+    }
+    function hasRole(r) {
+      return isAuthenticated() && request.auth.token.get('role', '') == r;
+    }
+    function isAdminOf(rid) {
+      return isPlatformAdmin() || (belongsTo(rid) && hasRole('admin'));
+    }
+    function isStaffOf(rid) {
+      return isPlatformAdmin() || (belongsTo(rid) && (hasRole('admin') || hasRole('staff')));
+    }
+    function isCookOf(rid) {
+      return isPlatformAdmin() || (belongsTo(rid) && hasRole('cook'));
+    }
+    function isMemberOf(rid) {
+      return isStaffOf(rid) || isCookOf(rid);
+    }
+
     // ─── Users Collection ────────────────────────────────────
     match /users/{userId} {
       allow read: if isAuthenticated() && (
@@ -252,6 +277,121 @@ service cloud.firestore {
     // Internal counters for bill numbering — no client access
     match /counters/{counterId} {
       allow read, write: if false;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // MULTI-TENANT: restaurants/{restaurantId}/...
+    // Every tenant's data is isolated: only that restaurant's staff (by claim)
+    // or a platform admin may touch it. Customers are unauthenticated and
+    // scoped by the {rid} in the path (from the QR URL).
+    // ═══════════════════════════════════════════════════════════
+    match /restaurants/{rid} {
+      // Tenant doc — public read (menu page needs name/branding/gstRate).
+      allow get: if true;
+      allow list: if isPlatformAdmin();
+      allow create, update: if isAdminOf(rid);
+      allow delete: if isPlatformAdmin();
+
+      // Private tenant config (Razorpay secret, etc.) — Admin SDK only.
+      match /private/{doc} {
+        allow read, write: if false;
+      }
+
+      match /menu/{itemId} {
+        allow read: if true;
+        allow create, update: if isAdminOf(rid) && isValidMenuItem(request.resource.data);
+        allow delete: if isAdminOf(rid);
+      }
+
+      match /orders/{orderId} {
+        // Cash only from clients; PAID orders are created server-side.
+        allow create: if (
+                        isValidOrderBase(request.resource.data)
+                        && request.resource.data.status == 'pending'
+                        && request.resource.data.createdAt == request.time
+                        && isValidCashOrder(request.resource.data)
+                      )
+                      || (
+                        isStaffOf(rid)
+                        && isValidOrderBase(request.resource.data)
+                        && request.resource.data.status == 'pending'
+                        && request.resource.data.createdAt == request.time
+                        && isValidCashOrder(request.resource.data)
+                        && request.resource.data.orderSource == 'staff'
+                        && 'staffId' in request.resource.data
+                        && 'staffName' in request.resource.data
+                      );
+        allow get: if true; // tracking via URL + token (checked client-side)
+        allow list: if isMemberOf(rid);
+        allow update: if (isStaffOf(rid) && isValidOrderBase(request.resource.data))
+                      || (isCookOf(rid)
+                          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+                          && request.resource.data.status in ['preparing', 'ready']);
+        allow delete: if isAdminOf(rid);
+      }
+
+      match /pendingOrders/{orderId} {
+        allow read, write: if false;
+      }
+
+      match /bills/{billId} {
+        allow get: if true;
+        allow list: if isStaffOf(rid);
+        allow create, update, delete: if false; // Cloud Functions only
+      }
+
+      match /feedback/{orderId} {
+        allow create: if exists(/databases/$(database)/documents/restaurants/$(rid)/orders/$(orderId))
+                      && request.resource.data.keys().hasAll(['rating', 'createdAt'])
+                      && request.resource.data.rating is number
+                      && request.resource.data.rating >= 1 && request.resource.data.rating <= 5
+                      && request.resource.data.createdAt == request.time
+                      && (!('comment' in request.resource.data) || (
+                        request.resource.data.comment is string &&
+                        request.resource.data.comment.size() <= 500 &&
+                        !request.resource.data.comment.matches('.*[<>].*')
+                      ));
+        allow get: if true;
+        allow list: if isStaffOf(rid);
+      }
+
+      match /menuRatings/{itemId} {
+        allow read: if true;
+        allow create: if request.resource.data.keys().hasOnly(['totalRating', 'ratingCount'])
+                      && request.resource.data.ratingCount == 1
+                      && request.resource.data.totalRating is number
+                      && request.resource.data.totalRating >= 1
+                      && request.resource.data.totalRating <= 5;
+        allow update: if request.resource.data.keys().hasOnly(['totalRating', 'ratingCount'])
+                      && request.resource.data.ratingCount == resource.data.ratingCount + 1
+                      && request.resource.data.totalRating - resource.data.totalRating >= 1
+                      && request.resource.data.totalRating - resource.data.totalRating <= 5;
+        allow delete: if false;
+      }
+
+      match /purchases/{id} {
+        allow read: if isStaffOf(rid);
+        allow create, update, delete: if isAdminOf(rid);
+      }
+
+      match /reports/{reportId} {
+        allow read: if isStaffOf(rid);
+        allow write: if false; // Cloud Functions only
+      }
+
+      match /counters/{counterId} {
+        allow read, write: if false;
+      }
+
+      match /staff/{uid} {
+        allow read: if isStaffOf(rid);
+        allow write: if false; // membership set by provisioning Cloud Functions
+      }
+    }
+
+    // ─── Platform (provider) data ────────────────────────────
+    match /platform/{document=**} {
+      allow read, write: if isPlatformAdmin();
     }
 
     // ═══════════════════════════════════════════════════════════
