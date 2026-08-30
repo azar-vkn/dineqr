@@ -25,7 +25,6 @@ const AdminBilling = lazy(() => import("./pages/AdminBilling"));
 const KitchenDisplay = lazy(() => import("./pages/KitchenDisplay"));
 const AdminPos = lazy(() => import("./pages/AdminPos"));
 const AdminPurchases = lazy(() => import("./pages/AdminPurchases"));
-const PlatformConsole = lazy(() => import("./pages/PlatformConsole"));
 
 // ─── Loading Fallback ────────────────────────────────────────
 function PageLoader() {
@@ -103,12 +102,9 @@ export default function App() {
               </RouteErrorBoundary>
             } />
 
-            {/* Provider platform console — self-gated to platform admins */}
-            <Route path="/platform" element={
-              <RouteErrorBoundary routeName="Platform Console">
-                <PlatformConsole />
-              </RouteErrorBoundary>
-            } />
+            {/* NOTE: the provider console is NOT part of this public app anymore.
+                It lives in a separate build (admin.html → src/admin/main.tsx),
+                deployed to its own hosting site + packaged as its own desktop app. */}
 
             {/* Admin Routes — auth guard via AdminLayout */}
             <Route path="/admin" element={

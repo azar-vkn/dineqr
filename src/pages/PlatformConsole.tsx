@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { httpsCallable } from "firebase/functions";
-import { getIdToken } from "firebase/auth";
+import { getIdToken, signInWithPopup, signInWithCredential, GoogleAuthProvider } from "firebase/auth";
 import { functions, auth } from "../firebase";
 import { useTenant } from "../hooks/useTenant";
 import { toast } from "sonner";
@@ -45,6 +45,33 @@ export default function PlatformConsole() {
     if (auth.currentUser) await getIdToken(auth.currentUser, true);
   };
 
+  // Self-contained sign-in (works on web via popup, and on the desktop build
+  // via the Electron loopback OAuth flow).
+  const handleSignIn = async () => {
+    setBusy("signin");
+    try {
+      const electronAPI = (window as any).electronAPI;
+      if (electronAPI?.signInWithGoogle) {
+        const clientId = import.meta.env.VITE_GOOGLE_DESKTOP_CLIENT_ID;
+        if (!clientId) {
+          toast.error("Desktop sign-in isn't configured.");
+          return;
+        }
+        const idToken = await electronAPI.signInWithGoogle({
+          clientId,
+          clientSecret: import.meta.env.VITE_GOOGLE_DESKTOP_CLIENT_SECRET,
+        });
+        await signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
+      } else {
+        await signInWithPopup(auth, new GoogleAuthProvider());
+      }
+    } catch {
+      toast.error("Sign-in failed.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-stone-50">
@@ -56,9 +83,15 @@ export default function PlatformConsole() {
   if (!user) {
     return (
       <Shell>
-        <p className="text-stone-600">
-          Please sign in first from the <a href="#/admin" className="text-emerald-700 font-semibold underline">admin page</a>, then return here.
-        </p>
+        <p className="text-stone-600 mb-4">Sign in with your provider account to manage restaurants.</p>
+        <button
+          onClick={handleSignIn}
+          disabled={busy === "signin"}
+          className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-800 text-white font-semibold rounded-xl hover:bg-emerald-900 disabled:opacity-50"
+        >
+          {busy === "signin" ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+          Sign in with Google
+        </button>
       </Shell>
     );
   }
