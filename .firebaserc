@@ -2,6 +2,17 @@
   "projects": {
     "default": "gen-lang-client-0683754671"
   },
-  "targets": {},
+  "targets": {
+    "gen-lang-client-0683754671": {
+      "hosting": {
+        "public": [
+          "gen-lang-client-0683754671"
+        ],
+        "admin": [
+          "dineqr-admin-console"
+        ]
+      }
+    }
+  },
   "etags": {}
 }
