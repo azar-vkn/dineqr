@@ -79,6 +79,36 @@ match /restaurants/{rid}/{document=**} {
 - Migration runs **dry-run** first; real cut-over only with explicit approval.
 - Nothing touches the live app until the migration step.
 
+## Progress (branch `phase3-multitenant`, NOT deployed)
+Done + committed:
+- ✅ **Increment 1** — tenant model, types, provisioning functions
+  (`createRestaurant`, `assignUserToRestaurant`, `claimPlatformAdmin`)
+- ✅ **Increment 2 (client)** — every customer + admin read/write scoped to
+  `restaurants/{rid}/…` (legacy fallback); tenant routing + tenant-aware QR
+- ✅ **Increment 2 (rules)** — `firestore.rules` claims-based isolation for
+  `restaurants/{rid}/…` + `platform/**` (⚠️ NOT emulator-validated yet)
+- ✅ **Increment 3** — payment functions read per-tenant menu + Razorpay keys;
+  `onTenantOrderCreated` bill trigger for `restaurants/{rid}/orders`
+
+## Finish-line runbook (remaining go-live work)
+1. **Validate rules** — install Java, then
+   `firebase emulators:exec --only firestore "npm run test:rules"` (write rules
+   unit tests with `@firebase/rules-unit-testing`). Do NOT deploy rules unvalidated.
+2. **Auth cutover** — switch `AdminLayout` gate from `useUserRole` (Firestore
+   users doc) to `useTenant` (claims); rework `AdminStaff` to list
+   `restaurants/{rid}/staff` and add members via `assignUserToRestaurant`.
+   (Breaking until claims exist — test on a staging tenant.)
+2b. **Storage rules** — scope `menu`/onboarding images per tenant.
+3. **Provider onboarding console** — small UI to call `createRestaurant` +
+   `assignUserToRestaurant`, and to set a tenant's Razorpay secret into
+   `restaurants/{rid}/private/razorpay` (Admin-SDK-written).
+4. **Per-tenant** `dailyRevenueReport` (iterate `restaurants`), subscription billing.
+5. **Migration** — Admin SDK script: copy top-level `orders/menu/bills/…` into
+   `restaurants/{firstId}/…`, set the first admin's claims, **dry-run first**,
+   review, then execute. Set `PLATFORM_ADMIN_EMAIL` in `functions/.env`.
+6. **Coordinated deploy** — functions + rules + hosting together, after staging
+   sign-off. Then bootstrap platform-admin (`claimPlatformAdmin`) and onboard.
+
 ## Legal / business (parallel track, not code)
 - Registered entity; **Terms of Service + Privacy Policy + Data Processing
   Agreement** (you process diners' data); **GST** registration for subscription fees.
