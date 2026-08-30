@@ -18,6 +18,7 @@ import { auth } from "../firebase";
 import { toast } from "sonner";
 import { useDailyReport } from "../hooks/useDailyReport";
 import { useUserRole } from "../hooks/useUserRole";
+import { useTenant } from "../hooks/useTenant";
 
 const electronAPI = (window as any).electronAPI as
   | { signInWithGoogle?: (config: { clientId: string; clientSecret?: string }) => Promise<string> }
@@ -25,7 +26,11 @@ const electronAPI = (window as any).electronAPI as
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
-  const { user, role, loading } = useUserRole();
+  const { user, role: legacyRole, loading } = useUserRole();
+  // Prefer multi-tenant claims; fall back to the legacy users-doc role during
+  // the single-tenant transition (non-breaking until migration sets claims).
+  const { role: claimRole } = useTenant();
+  const role = claimRole ?? legacyRole;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
